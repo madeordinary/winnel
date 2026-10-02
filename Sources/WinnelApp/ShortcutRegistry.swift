@@ -38,8 +38,8 @@ struct ShortcutSpec: Codable, Equatable {
             let result = RegisterEventHotKey(shortcut.keyCode, shortcut.modifiers, EventHotKeyID(signature: 0x57696e6e, id: UInt32(index + 1)), GetApplicationEventTarget(), 0, &reference)
             guard result == noErr, let reference else {
                 unregister(); activePair = nil
-                if let previous { _ = configure(palette: previous.0, next: previous.1) }
-                error = "A shortcut is unavailable. The previous working shortcuts were restored."; return false
+                let restored = previous.map { configure(palette: $0.0, next: $0.1) } ?? false
+                error = restored ? "A shortcut is unavailable. The previous working shortcuts were restored." : "Shortcuts are unavailable. Open Winnel from the menu bar and choose different shortcuts in Settings."; return false
             }
             registrations.append(reference)
         }

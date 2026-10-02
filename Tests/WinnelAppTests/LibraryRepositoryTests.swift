@@ -267,6 +267,28 @@ private actor RepositoryCaptureAuthorization {
     func check() -> Bool { allowed }
 }
 extension LibraryRepositoryTests {
+    func testRAMCaptureRevokedAfterInitialCheckDoesNotPublish() async throws {
+        actor RevokedAfterFirstCheck {
+            private var allowed = true
+            func check() -> Bool { defer { allowed = false }; return allowed }
+        }
+        let url = try directory(), repo = try LibraryRepository(directory: url, provider: FixtureVaultKeys())
+        _ = try await repo.mutate { $0.settings.retention = .ramOnly }
+        let original = try await repo.ingest(text("existing synthetic RAM item"), source: .init(), now: Date(), sessionIDs: [])
+        let beforeIDs = await repo.memoryPayloadIDs
+        let manifest = try Data(contentsOf: url.appendingPathComponent("manifest.sealed"))
+        let authorization = RevokedAfterFirstCheck()
+        do {
+            _ = try await repo.ingest(text("revoked synthetic RAM capture"), source: .init(), now: Date(), sessionIDs: [], isStillAuthorized: { await authorization.check() })
+            XCTFail("Authorization lost during ingestion must prevent RAM publication")
+        } catch { XCTAssertTrue(error is CancellationError) }
+        let current = try await repo.mutate { _ in }
+        let afterIDs = await repo.memoryPayloadIDs
+        XCTAssertEqual(current.state, original.state)
+        XCTAssertEqual(current.revision, original.revision)
+        XCTAssertEqual(afterIDs, beforeIDs)
+        XCTAssertEqual(try Data(contentsOf: url.appendingPathComponent("manifest.sealed")), manifest)
+    }
     func testCaptureRevokedDuringKeyWaitDoesNotPublishOrWriteIncoming() async throws {
         let url = try directory(), keys = RepositoryKeyBarrier()
         let repo = try LibraryRepository(directory: url, provider: keys)

@@ -148,6 +148,7 @@ actor LibraryRepository {
             guard bytes <= Self.ramBudget else { throw LibraryError.savedStorageFull }
             // No persistence operation is needed for RAM-only ingestion when saved metadata is unchanged.
             if candidate.persistentSnapshot() == state.persistentSnapshot() {
+                guard await isStillAuthorized(), !Task.isCancelled else { throw CancellationError() }
                 if candidate.items.contains(where: { $0.id == item.id }) { memoryPayloads[item.id] = payload }
                 let keep = Set(candidate.items.map(\.id)); memoryPayloads = memoryPayloads.filter { keep.contains($0.key) }
                 state = candidate; hasLoaded = true; revision += 1; return .init(state: state, usage: try await vault.usageBytes(), revision: revision)

@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import ImageIO
 @testable import WinnelApp
 import WinnelCore
 import WinnelPlatform
@@ -188,6 +189,42 @@ extension AppModelTests {
         await model.shutdown()
     }
 
+    @MainActor func testCaptureBackpressureKeepsOnePendingCopyThenAcceptsLaterCopy() async throws {
+        let gate = OperationBarrier(), (model, repo, _) = try await controlledModel(mutationGate: gate)
+        model.enableCapture(); try await settle { model.captureState == .active }
+        await gate.arm()
+        let blocker = Task { try await repo.mutate { _ in } }
+        await gate.waitUntilEntered()
+        let first = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data(("first retained synthetic copy " + String(repeating: "a", count: 1_000_000)).utf8))])
+        model.monitor.onCapture(first, .init())
+        let deadline = Date().addingTimeInterval(5)
+        while await repo.queuedTransactionCount == 0, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        for index in 0..<10 {
+            let skipped = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data(("skipped synthetic copy \(index) " + String(repeating: "b", count: 1_000_000)).utf8))])
+            model.monitor.onCapture(skipped, .init())
+        }
+        let queued = await repo.queuedTransactionCount
+        XCTAssertEqual(queued, 1, "Capture backpressure must not queue another retained payload")
+        XCTAssertEqual(model.status, "Skipped a clipboard change while the previous capture is saving.")
+        await gate.release(); _ = try await blocker.value
+        try await settle { model.state.items.contains { $0.fingerprint == first.fingerprint } }
+        let committed = try await repo.mutate { _ in }
+        XCTAssertEqual(committed.state.items.count, 2)
+        XCTAssertFalse(committed.state.items.contains { $0.textPreview.hasPrefix("skipped synthetic copy") })
+        let firstItem = try XCTUnwrap(committed.state.items.first { $0.fingerprint == first.fingerprint })
+        let stored = try await repo.payload(firstItem.id)
+        XCTAssertEqual(stored, first)
+        let later = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data("later accepted synthetic copy".utf8))])
+        model.monitor.onCapture(later, .init())
+        try await settle { model.state.items.contains { $0.fingerprint == later.fingerprint } }
+        let finished = try await repo.mutate { _ in }
+        XCTAssertEqual(finished.state.items.count, 3)
+        XCTAssertEqual(finished.state.lastUserCopyID, finished.state.items.first { $0.fingerprint == later.fingerprint }?.id)
+        XCTAssertLessThanOrEqual(firstItem.copiedAt, try XCTUnwrap(finished.state.items.first { $0.fingerprint == later.fingerprint }).copiedAt)
+        XCTAssertEqual(model.captureState, .active)
+        await model.shutdown()
+    }
+
     @MainActor func testSelectedPasteCancelsWhenClipboardChangesDuringDismissal() async throws {
         let (model, _, _) = try await controlledModel()
         let board = model.pasteboardService.pasteboard
@@ -269,6 +306,81 @@ extension AppModelTests {
         XCTAssertEqual(reads, 1, "No canceled export may read the next item or reach a chooser")
         XCTAssertEqual(model.status, status)
         XCTAssertEqual(model.captureState, .suspended)
+        await model.shutdown()
+    }
+
+    @MainActor private func addImageSelection(_ model: AppModel, repo: LibraryRepository, valid: Bool = true) async throws -> ClipboardItem {
+        let bytes: Data
+        if valid {
+            let context = try XCTUnwrap(CGContext(data: nil, width: 640, height: 320, bitsPerComponent: 8, bytesPerRow: 640 * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            context.setFillColor(CGColor(red: 0.8, green: 0.2, blue: 0.1, alpha: 1))
+            context.fill(CGRect(x: 0, y: 0, width: 640, height: 320))
+            let image = try XCTUnwrap(context.makeImage())
+            let output = NSMutableData()
+            let destination = try XCTUnwrap(CGImageDestinationCreateWithData(output, "public.png" as CFString, 1, nil))
+            CGImageDestinationAddImage(destination, image, nil)
+            XCTAssertTrue(CGImageDestinationFinalize(destination))
+            bytes = output as Data
+        } else { bytes = Data("synthetic invalid image".utf8) }
+        let payload = ClipPayload(representations: [.init(type: "public.png", data: bytes)])
+        let snapshot = try await repo.ingest(payload, source: .init(), now: Date(), sessionIDs: [])
+        let image = try XCTUnwrap(snapshot.state.items.first { $0.kind == .image })
+        model.state = snapshot.state; model.selectedIDs = [image.id]; model.selectionOrder = [image.id]
+        return image
+    }
+
+    @MainActor func testImagePreviewPublishesBoundedThumbnailAndClearsItWhenLocked() async throws {
+        let gate = OperationBarrier(), (model, repo, _) = try await controlledModel(payloadGate: gate)
+        let image = try await addImageSelection(model, repo: repo)
+        model.loadPreview(image.id); await model.waitForContentOperations()
+        let bytes = try XCTUnwrap(model.previewThumbnailData)
+        let source = try XCTUnwrap(CGImageSourceCreateWithData(bytes as CFData, nil))
+        let thumbnail = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 0, nil))
+        XCTAssertEqual(thumbnail.width, 256); XCTAssertEqual(thumbnail.height, 128)
+        XCTAssertTrue(model.previewThumbnailFinished)
+        XCTAssertNotNil(model.previewPayload)
+        await gate.arm(); model.loadPreview(image.id); await gate.waitUntilEntered()
+        XCTAssertNil(model.previewThumbnailData); XCTAssertFalse(model.previewThumbnailFinished)
+        model.handleLifecycleSuspension()
+        await gate.release(); await model.waitForContentOperations()
+        XCTAssertNil(model.previewThumbnailData); XCTAssertNil(model.previewPayload)
+        XCTAssertFalse(model.previewThumbnailFinished)
+        await model.shutdown()
+    }
+
+    @MainActor func testNewSelectionSupersedesRepeatedImageLoadsWithoutPublishingStaleThumbnail() async throws {
+        let gate = OperationBarrier(), (model, repo, text) = try await controlledModel(payloadGate: gate)
+        let image = try await addImageSelection(model, repo: repo)
+        await gate.arm(); model.loadPreview(image.id); await gate.waitUntilEntered()
+        for _ in 0..<10 { model.loadPreview(image.id) }
+        model.selectedIDs = [text.id]; model.selectionOrder = [text.id]; model.loadPreview(text.id)
+        await gate.release(); await model.waitForContentOperations()
+        let reads = await gate.invocationCount()
+        XCTAssertEqual(reads, 2, "Canceled image requests must not load more payloads before the latest text selection")
+        XCTAssertEqual(model.previewPayload?.plainText, "synthetic protected content")
+        XCTAssertNil(model.previewThumbnailData); XCTAssertTrue(model.previewThumbnailFinished)
+        await model.shutdown()
+    }
+
+    @MainActor func testDeletingImageRevokesPendingThumbnailPublication() async throws {
+        let gate = OperationBarrier(), (model, repo, _) = try await controlledModel(payloadGate: gate)
+        let image = try await addImageSelection(model, repo: repo)
+        await gate.arm(); model.loadPreview(image.id); await gate.waitUntilEntered()
+        model.deleteEverywhere(image.id)
+        await gate.release(); await model.waitForContentOperations()
+        try await settle { !model.state.items.contains { $0.id == image.id } }
+        XCTAssertNil(model.previewThumbnailData); XCTAssertNil(model.previewPayload)
+        XCTAssertFalse(model.previewThumbnailFinished)
+        await model.shutdown()
+    }
+
+    @MainActor func testInvalidImageFinishesWithUnavailableThumbnailRatherThanStaleImage() async throws {
+        let (model, repo, _) = try await controlledModel()
+        let image = try await addImageSelection(model, repo: repo, valid: false)
+        model.loadPreview(image.id); await model.waitForContentOperations()
+        XCTAssertTrue(model.previewThumbnailFinished)
+        XCTAssertNil(model.previewThumbnailData)
+        XCTAssertEqual(model.previewPayload?.representations.first?.data, Data("synthetic invalid image".utf8))
         await model.shutdown()
     }
 

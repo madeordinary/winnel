@@ -60,7 +60,7 @@ struct LibraryView: View {
         if let item = selectedMember {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    PayloadPreviewView(item: item, payload: model.previewPayload); Divider(); ItemMetadataView(item: item)
+                    PayloadPreviewView(item: item, payload: model.previewPayload, thumbnailData: model.previewThumbnailData, thumbnailFinished: model.previewThumbnailFinished); Divider(); ItemMetadataView(item: item)
                     if let url = stack?.memberships.first(where: { $0.itemID == item.id })?.associatedURL { Text("Associated URL").font(.headline); Text(url).textSelection(.enabled).font(.callout) }
                     HStack { Button("Copy") { model.copySelected() }; Button(item.isPinned ? "Unpin" : "Pin") { model.togglePin(item.id) } }
                     Button("Associate a URL…") { associate = true }

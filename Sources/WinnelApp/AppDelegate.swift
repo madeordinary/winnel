@@ -122,7 +122,7 @@ final class PalettePanel: NSPanel {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
         window.title = title; window.contentView = NSHostingView(rootView: view); window.isReleasedWhenClosed = false; window.isRestorable = false; window.center(); return window
     }
-    func windowDidResize(_ notification: Notification) { if let window = notification.object as? NSWindow, window === panel { UserDefaults.standard.set(NSStringFromSize(window.frame.size), forKey: "paletteSize") } }
+    func windowDidResize(_ notification: Notification) { if let window = notification.object as? NSWindow, window === panel { UserDefaults.standard.set(NSStringFromSize(window.contentLayoutRect.size), forKey: "paletteSize") } }
     private func setupLifecycle() {
         for name in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
             observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.model.handleLifecycleSuspension(); self?.dismissPalette(); self?.refreshMenu() } })

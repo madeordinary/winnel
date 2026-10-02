@@ -86,7 +86,7 @@ struct PaletteView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     HStack { Text(model.selectedItems.count > 1 ? "\(model.selectedItems.count) selected" : "Preview").font(.headline); Spacer(); Button { model.togglePin(item.id) } label: { Image(systemName: item.isPinned ? "pin.fill" : "pin") }.accessibilityLabel(item.isPinned ? "Unpin item" : "Pin item") }
-                    PayloadPreviewView(item: item, payload: model.previewPayload)
+                    PayloadPreviewView(item: item, payload: model.previewPayload, thumbnailData: model.previewThumbnailData, thumbnailFinished: model.previewThumbnailFinished)
                     Divider(); ItemMetadataView(item: item)
                     if model.selectedItems.count > 1 { Text("The first selected item is shown. Review the order before combining or starting a queue.").font(.callout).foregroundStyle(.secondary) }
                 }.padding(18)
@@ -120,8 +120,8 @@ struct PaletteView: View {
 struct PayloadPreviewView: View {
     let item: ClipboardItem
     let payload: ClipPayload?
-    @State private var thumbnailData: Data?
-    @State private var thumbnailFinished = false
+    let thumbnailData: Data?
+    let thumbnailFinished: Bool
     var body: some View {
         if let payload {
             if item.kind == .image {
@@ -129,11 +129,6 @@ struct PayloadPreviewView: View {
                     if let thumbnailData, let image = NSImage(data: thumbnailData) { Image(nsImage: image).resizable().scaledToFit().frame(maxHeight: 260).accessibilityLabel("Bounded captured image preview") }
                     else if thumbnailFinished { Label("Image preview unavailable", systemImage: "photo.badge.exclamationmark").foregroundStyle(.secondary) }
                     else { ProgressView("Preparing bounded image preview…") }
-                }.task(id: payload) {
-                    thumbnailData = nil; thumbnailFinished = false
-                    let bytes = payload.representations.first(where: { ["public.png", "public.tiff", "public.jpeg"].contains($0.type) })?.data
-                    let result = await Task.detached(priority: .userInitiated) { bytes.flatMap { WinnelPlatform.CapturePolicy().thumbnail($0) } }.value
-                    guard !Task.isCancelled else { return }; thumbnailData = result; thumbnailFinished = true
                 }
             } else if item.kind == .files {
                 ForEach(Array(payload.fileReferences.enumerated()), id: \.offset) { _, file in

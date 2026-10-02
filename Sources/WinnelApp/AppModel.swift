@@ -22,6 +22,8 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     @Published var combinationPreview = ""
     @Published var combinationFormat: CombinationFormat = .newline
     @Published var previewPayload: ClipPayload?
+    @Published private(set) var previewThumbnailData: Data?
+    @Published private(set) var previewThumbnailFinished = false
     @Published private var searchResults: [ClipboardItem] = []
     let fixtureMode: Bool
     let pasteboardService: PasteboardService
@@ -38,6 +40,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     private var paletteTarget: WinnelPlatform.PasteTarget?
     private var retentionTimer: Timer?
     private var searchTask: Task<Void, Never>?
+    private var captureTask: Task<Void, Never>?
     private var combinationGeneration = 0
     private var previewGeneration = 0
     private var captureControlGeneration = 0
@@ -136,7 +139,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         previewGeneration += 1; combinationGeneration += 1
         for task in contentTasks.values { task.cancel() }
         queue?.cancel(); queue = nil
-        previewPayload = nil; combinationPreview = ""
+        previewPayload = nil; previewThumbnailData = nil; previewThumbnailFinished = false; combinationPreview = ""
         searchTask?.cancel(); searchResults = []
     }
     private func contentOperationIsCurrent(_ generation: Int) -> Bool {
@@ -211,9 +214,14 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     }
     private func capture(_ payload: ClipPayload, source: SourceApplication) {
         guard state.settings.captureEnabled, recoveryMessage == nil, captureState == .active, !shuttingDown else { return }
+        guard captureTask == nil else {
+            status = "Skipped a clipboard change while the previous capture is saving."
+            return
+        }
         let ids = queue?.retainedIDs ?? []
         let generation = captureControlGeneration
-        Task {
+        captureTask = Task {
+            defer { captureTask = nil }
             guard generation == captureControlGeneration, captureState == .active, let repository else { return }
             do {
                 let snapshot = try await repository.ingest(payload, source: source, now: Date(), sessionIDs: ids, isStillAuthorized: { [weak self] in
@@ -364,16 +372,26 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     }
     func capturePaletteTarget() { paletteTarget = targetService.captureTarget() }
     func loadPreview(_ id: UUID) {
-        previewPayload = nil; previewGeneration += 1
+        previewPayload = nil; previewThumbnailData = nil; previewThumbnailFinished = false; previewGeneration += 1
         let generation = previewGeneration
+        let isImage = state.items.first { $0.id == id }?.kind == .image
         runContentOperation(kind: .preview) { operation in
             do {
                 guard self.contentOperationIsCurrent(operation), self.previewGeneration == generation else { return }
                 guard let payload = try await self.repository?.payload(id) else { return }
                 guard self.contentOperationIsCurrent(operation), self.previewGeneration == generation else { return }
-                let preview = try await self.detachedContent { Self.resolvingFileMetadata(payload) }
+                let (preview, thumbnail) = try await self.detachedContent {
+                    let preview = Self.resolvingFileMetadata(payload)
+                    try Task.checkCancellation()
+                    let bytes = isImage ? payload.representations.first { ["public.png", "public.tiff", "public.jpeg"].contains($0.type) }?.data : nil
+                    // ImageIO work cannot be interrupted mid-decode. The preview slot
+                    // waits for this worker to finish before loading another payload.
+                    let thumbnail = bytes.flatMap { CapturePolicy().thumbnail($0) }
+                    try Task.checkCancellation()
+                    return (preview, thumbnail)
+                }
                 guard self.contentOperationIsCurrent(operation), self.previewGeneration == generation, self.selectedItems.first?.id == id else { return }
-                self.previewPayload = preview
+                self.previewThumbnailData = thumbnail; self.previewThumbnailFinished = true; self.previewPayload = preview
             }
             catch { if self.contentOperationIsCurrent(operation) { self.fail(error) } }
         }
@@ -517,12 +535,21 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         }
     }
     func exportCombination() {
-        let generation = contentGeneration
-        guard contentOperationIsCurrent(generation), !combinationPreview.isEmpty else { return }
-        let bytes = Data(combinationPreview.utf8)
-        let panel = NSSavePanel(); panel.nameFieldStringValue = "winnel-combination.txt"; panel.message = "Export the exact combination preview."
-        guard panel.runModal() == .OK, let url = panel.url, contentOperationIsCurrent(generation) else { return }
-        do { try bytes.write(to: url, options: .atomic); status = "Combination exported." } catch { status = "Export failed." }
+        guard contentOperationIsCurrent(contentGeneration), !combinationPreview.isEmpty else { return }
+        let preview = combinationPreview
+        runContentOperation(kind: .exportPreparation) { [self] operation in
+            let panel = NSSavePanel(); panel.nameFieldStringValue = "winnel-combination.txt"; panel.message = "Export the exact combination preview."
+            guard panel.runModal() == .OK, let url = panel.url, contentOperationIsCurrent(operation) else { return }
+            do {
+                try await detachedContent {
+                    let bytes = Data(preview.utf8)
+                    try Task.checkCancellation()
+                    try bytes.write(to: url, options: .atomic)
+                }
+                guard contentOperationIsCurrent(operation) else { return }
+                status = "Combination exported."
+            } catch { if contentOperationIsCurrent(operation) { status = "Export failed." } }
+        }
     }
     func exportSelected() { exportSelection(format: .markdown, includeImages: false) }
     nonisolated private static func resolvingFileMetadata(_ payload: ClipPayload) -> ClipPayload {

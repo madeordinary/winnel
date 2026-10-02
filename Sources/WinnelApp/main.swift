@@ -1,5 +1,16 @@
 import AppKit
 let application = NSApplication.shared
+if let index = CommandLine.arguments.firstIndex(of: "--preview-performance") {
+    guard index + 1 < CommandLine.arguments.count, CommandLine.arguments[index + 1].hasPrefix("/") else { exit(2) }
+    let directory = URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true)
+    application.setActivationPolicy(.accessory)
+    Task { @MainActor in
+        do { try await FixturePreviewPerformance.run(outputDirectory: directory); exit(0) }
+        catch { fputs("Winnel isolated preview measurement failed. See its report.\n", stderr); exit(1) }
+    }
+    application.run()
+    exit(0)
+}
 if let index = CommandLine.arguments.firstIndex(of: "--performance") {
     guard index + 1 < CommandLine.arguments.count, CommandLine.arguments[index + 1].hasPrefix("/") else { exit(2) }
     let directory = URL(fileURLWithPath: CommandLine.arguments[index + 1], isDirectory: true)
