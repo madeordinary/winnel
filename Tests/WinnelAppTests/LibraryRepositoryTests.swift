@@ -12,6 +12,25 @@ final class LibraryRepositoryTests: XCTestCase, @unchecked Sendable {
         return url
     }
     private func text(_ value: String) -> ClipPayload { .init(representations: [.init(type: "public.utf8-plain-text", data: Data(value.utf8))]) }
+    func testCaptureSerializedBoundaryRejectsWithoutChangingDiskOrHistory() async throws {
+        let url = try directory(), repo = try LibraryRepository(directory: url, provider: FixtureVaultKeys())
+        let payload = text("serialized boundary fixture")
+        let bytes = try JSONEncoder().encode(payload).count
+        _ = try await repo.mutate { $0.settings.captureByteLimit = bytes - 1 }
+        let manifest = try Data(contentsOf: url.appendingPathComponent("manifest.sealed"))
+        do {
+            _ = try await repo.ingest(payload, source: .init(), now: Date(), sessionIDs: [])
+            XCTFail("Serialized payload exceeding the configured limit must fail")
+        } catch { XCTAssertEqual(error as? LibraryError, .captureTooLarge) }
+        let unchanged = try await repo.mutate { _ in }
+        XCTAssertTrue(unchanged.state.items.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: url.appendingPathComponent("manifest.sealed")), manifest)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: url.path), ["manifest.sealed"])
+        _ = try await repo.mutate { $0.settings.captureByteLimit = bytes }
+        let admitted = try await repo.ingest(payload, source: .init(), now: Date(), sessionIDs: [])
+        XCTAssertEqual(admitted.state.items.count, 1)
+        XCTAssertEqual(admitted.state.items.first?.payloadByteCount, bytes)
+    }
     func testRAMRecentDoesNotReachDiskAndPinPromotesBeforeUnpin() async throws {
         let url = try directory(), keys = FixtureVaultKeys()
         let repo = try LibraryRepository(directory: url, provider: keys)

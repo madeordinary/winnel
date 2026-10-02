@@ -43,6 +43,42 @@ final class PlatformTests: XCTestCase {
         XCTAssertEqual(board.string(forType: .string), "new copy")
         XCTAssertTrue(service.clear(expectedChangeCount: board.changeCount))
     }
+    @MainActor func testCompleteRawBudgetPrecedesImageParser() {
+        let board = NSPasteboard(name: .init("winnel-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        var policy = CapturePolicy(); policy.byteLimit = 1024
+        let service = PasteboardService(pasteboard: board, policy: policy)
+        let item = NSPasteboardItem()
+        item.setData(Data("invalid image".utf8), forType: .png)
+        item.setData(Data(repeating: 0, count: 900), forType: .tiff)
+        XCTAssertTrue(board.writeObjects([item]))
+        if case .skipped(.oversized) = service.readSnapshot() {} else { XCTFail("The complete raw budget must reject before the earlier invalid image is parsed") }
+    }
+    @MainActor func testDerivedRTFTextMustFitFinalSerializedBudget() throws {
+        let board = NSPasteboard(name: .init("winnel-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        let rich = Data(("{\\rtf1\\ansi " + String(repeating: "x", count: 1000) + "}").utf8)
+        let raw = ClipPayload(representations: [.init(type: "public.rtf", data: rich)])
+        var policy = CapturePolicy(); policy.byteLimit = try XCTUnwrap(policy.serializedSize(raw)) + 256
+        XCTAssertNotNil(policy.plainTextFromSafeRTF(rich))
+        let item = NSPasteboardItem(); item.setData(rich, forType: .rtf)
+        XCTAssertTrue(board.writeObjects([item]))
+        if case .skipped(.oversized) = PasteboardService(pasteboard: board, policy: policy).readSnapshot() {} else { XCTFail("Derived plain text must count in the final serialized payload") }
+    }
+    @MainActor func testEscapedFileMetadataMustFitFinalSerializedBudget() throws {
+        let board = NSPasteboard(name: .init("winnel-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        let string = "file:///synthetic/" + String(repeating: "\"", count: 1000)
+        let data = Data(string.utf8)
+        let raw = ClipPayload(representations: [.init(type: "public.file-url", data: data)])
+        var policy = CapturePolicy(); policy.byteLimit = try XCTUnwrap(policy.serializedSize(raw)) + 256
+        let url = try XCTUnwrap(URL(string: string))
+        let derived = ClipPayload(fileReferences: [.init(urlString: string, displayName: url.lastPathComponent)])
+        XCTAssertGreaterThan(try XCTUnwrap(policy.serializedSize(derived)), policy.byteLimit)
+        let item = NSPasteboardItem(); item.setData(data, forType: .fileURL)
+        XCTAssertTrue(board.writeObjects([item]))
+        if case .skipped(.oversized) = PasteboardService(pasteboard: board, policy: policy).readSnapshot() {} else { XCTFail("Escaped URL and display name must count in the final payload") }
+    }
     @MainActor func testPauseResumeBaseline() async throws {
         let board = NSPasteboard(name: .init("winnel-test-\(UUID().uuidString)"))
         defer { board.releaseGlobally() }

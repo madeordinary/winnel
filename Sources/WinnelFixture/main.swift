@@ -7,6 +7,14 @@ import AppKit
         guard let value = board.string(forType: .string) else { return }
         insertText(value, replacementRange: selectedRange())
     }
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        // NSTextView's default Paste validation consults the general clipboard.
+        // Keep both validation and delivery inside this synthetic named board.
+        if item.action == #selector(NSText.paste(_:)) {
+            return isEditable && board.availableType(from: [.string]) != nil
+        }
+        return super.validateUserInterfaceItem(item)
+    }
 }
 @MainActor final class FixtureDelegate: NSObject, NSApplicationDelegate {
     var window: NSWindow!

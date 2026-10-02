@@ -132,6 +132,7 @@ actor LibraryRepository {
         await acquire(); defer { release() }
         guard await isStillAuthorized(), !Task.isCancelled else { throw CancellationError() }
         let encoded = try JSONEncoder().encode(payload)
+        guard encoded.count <= state.settings.captureByteLimit else { throw LibraryError.captureTooLarge }
         let kind: ClipKind = !payload.fileReferences.isEmpty ? .files : payload.representations.contains(where: { $0.type == "public.url" }) ? .url : payload.representations.contains(where: { ["public.png", "public.tiff", "public.jpeg"].contains($0.type) }) ? .image : payload.representations.contains(where: { $0.type == "public.rtf" }) ? .richText : .text
         let text = payload.plainText ?? payload.fileReferences.map(\.displayName).joined(separator: ", ")
         let preview = kind == .image ? "Image" : text

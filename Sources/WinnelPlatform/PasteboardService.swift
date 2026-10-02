@@ -182,7 +182,7 @@ private enum SnapshotRead {
         // text/image items into an apparently faithful single item; ordered file references
         // are the supported multiple-item exception.
         guard items.count == 1 || fileOnly else { return .skipped(.unsupported) }
-        var payload = ClipPayload()
+        var acquired = ClipPayload()
         var estimated = 128
         for (index, item) in items.enumerated() {
             for raw in (fileOnly ? ["public.file-url"] : CapturePolicy.allowedTypes) where types[index].contains(NSPasteboard.PasteboardType(raw)) {
@@ -193,18 +193,27 @@ private enum SnapshotRead {
                 guard let data = item.data(forType: NSPasteboard.PasteboardType(raw)) else { continue }
                 guard data.count <= policy.byteLimit, data.count <= (policy.byteLimit - estimated) / 4 * 3 else { return .skipped(.oversized) }
                 estimated += ((data.count + 2) / 3) * 4 + raw.utf8.count + 64
-                if ["public.png", "public.tiff", "public.jpeg"].contains(raw), !policy.permitsImage(data) { return .skipped(.invalidImage) }
-                if raw == "public.file-url" {
-                    guard let string = String(data: data, encoding: .utf8), let url = URL(string: string), url.isFileURL else { continue }
-                    payload.fileReferences.append(.init(urlString: string, displayName: url.lastPathComponent, availability: .unknown))
-                } else if raw == "public.rtf" {
-                    guard let text = policy.plainTextFromSafeRTF(data) else { continue }
-                    payload.representations.append(.init(type: raw, data: data))
-                    if payload.plainText == nil {
-                        payload.representations.append(.init(type: "public.utf8-plain-text", data: Data(text.utf8)))
-                    }
-                } else { payload.representations.append(.init(type: raw, data: data)) }
+                acquired.representations.append(.init(type: raw, data: data))
             }
+        }
+        // Admit the complete serialized input before any content parser runs. Derived
+        // text/file metadata has a separate exact admission gate before publication.
+        guard let acquiredSize = policy.serializedSize(acquired), acquiredSize <= policy.byteLimit else { return .skipped(.oversized) }
+        var payload = ClipPayload()
+        for representation in acquired.representations {
+            let raw = representation.type, data = representation.data
+            guard !Task.isCancelled else { return .skipped(.changed) }
+            if ["public.png", "public.tiff", "public.jpeg"].contains(raw), !policy.permitsImage(data) { return .skipped(.invalidImage) }
+            if raw == "public.file-url" {
+                guard let string = String(data: data, encoding: .utf8), let url = URL(string: string), url.isFileURL else { continue }
+                payload.fileReferences.append(.init(urlString: string, displayName: url.lastPathComponent, availability: .unknown))
+            } else if raw == "public.rtf" {
+                guard let text = policy.plainTextFromSafeRTF(data) else { continue }
+                payload.representations.append(.init(type: raw, data: data))
+                if payload.plainText == nil {
+                    payload.representations.append(.init(type: "public.utf8-plain-text", data: Data(text.utf8)))
+                }
+            } else { payload.representations.append(.init(type: raw, data: data)) }
         }
         guard pasteboard.changeCount == count, let settled = pasteboard.pasteboardItems,
               settled.count == items.count, settled.map({ $0.types }) == types else { return .skipped(.changed) }
