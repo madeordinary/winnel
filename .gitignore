@@ -41,8 +41,16 @@ xcuserdata/
 /local-data/
 /exports/
 
-# Raw logs stay local; reviewed synthetic verification receipts are deliberate
+# Raw logs stay local; publish reviewed results in docs/verification.md
 *.log
-!/docs/evidence/**/*.log
 
-# Keep Package.resolved, source/tests, licenses and shared Serel memory tracked.
+# Private agent continuity and raw observations stay on each developer's machine.
+/memory-bank/
+/GOAL.md
+/.rules
+/docs/evidence/
+/docs/serel-seed-proposal.md
+/docs/serel-seed.diff
+/docs/implementation-plan.md
+
+# Keep Package.resolved, source/tests, licenses and sanitized contributor docs tracked.
