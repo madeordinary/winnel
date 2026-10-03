@@ -18,49 +18,50 @@ struct LibraryView: View {
         return model.state.items.first { $0.id == memberID }
     }
     var body: some View {
-        NavigationSplitView {
-            List(model.state.stacks, selection: $stackID) { stack in
-                VStack(alignment: .leading, spacing: 4) { Text(stack.name).lineLimit(2); Text("\(stack.memberships.count) items").font(.caption).foregroundStyle(.secondary) }.tag(stack.id).accessibilityElement(children: .combine)
-            }.navigationTitle("Saved stacks")
-            .navigationSplitViewColumnWidth(min: 220, ideal: 250, max: 340)
-            .toolbar { Button { create = true } label: { Label("New stack", systemImage: "plus") }.help("Create an empty named stack") }
-        } detail: {
+        HSplitView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Saved stacks").font(.title2.bold())
+                    Button { create = true } label: { Label("New stack", systemImage: "plus") }
+                        .help("Create an empty named stack")
+                }.padding(16)
+                Divider()
+                List(model.state.stacks, selection: $stackID) { stack in
+                    VStack(alignment: .leading, spacing: 4) { Text(stack.name).lineLimit(2); Text("\(stack.memberships.count) items").font(.caption).foregroundStyle(.secondary) }.tag(stack.id).accessibilityElement(children: .combine)
+                }.listStyle(.sidebar).accessibilityLabel("Saved stacks")
+            }.frame(minWidth: 220, idealWidth: 250, maxWidth: 340)
             if let stack {
                 GeometryReader { geometry in
-                VStack(alignment: .leading, spacing: 0) {
-                    if stack.memberships.isEmpty { EmptyLibraryView(title: "Ready to collect", description: "Select clipboard items in the palette, then choose Add to stack. An item can belong to several stacks.", symbol: "square.stack") }
-                    else {
-                        HSplitView {
-                            List(selection: $memberID) {
-                                ForEach(Array(stack.memberships.enumerated()), id: \.element.itemID) { index, membership in
-                                    if let item = model.state.items.first(where: { $0.id == membership.itemID }) {
-                                        VStack(alignment: .leading, spacing: 6) {
-                                            HStack { Text("\(index + 1)").font(.caption.monospacedDigit()).foregroundStyle(.secondary); ItemRow(item: item); Spacer() }
-                                            HStack { Button { move(index: index, by: -1) } label: { Image(systemName: "arrow.up") }.disabled(index == 0).accessibilityLabel("Move \(item.textPreview) up"); Button { move(index: index, by: 1) } label: { Image(systemName: "arrow.down") }.disabled(index + 1 == stack.memberships.count).accessibilityLabel("Move \(item.textPreview) down"); if membership.associatedURL != nil { Label("Associated link", systemImage: "link").font(.caption).foregroundStyle(.secondary) } }.buttonStyle(.borderless)
-                                        }.tag(item.id).padding(.vertical, 3)
-                                    }
-                                }
-                            }.frame(minWidth: 280, idealWidth: 320, maxWidth: max(280, geometry.size.width - 261))
-                            memberDetail.frame(minWidth: 260, idealWidth: 350, maxWidth: max(260, geometry.size.width - 281))
-                        }
-                    }
-                }.frame(width: geometry.size.width, height: geometry.size.height)
-                }
-                .safeAreaInset(edge: .top, spacing: 0) {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("\(stack.memberships.count) ordered items").foregroundStyle(.secondary).padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                        HStack(alignment: .center, spacing: 16) {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(stack.name).font(.title2.bold()).lineLimit(2)
+                                Text("\(stack.memberships.count) ordered items").foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Menu("Stack actions") { Button("Rename…") { rename = true }; Button("Export stack…") { selectWholeStack(); export = true }; Button("Combine stack…") { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true }; Divider(); Button("Delete stack…", role: .destructive) { confirmDeleteStack = true } }.fixedSize()
+                        }.padding(20)
                         Divider()
-                    }
+                        if stack.memberships.isEmpty { EmptyLibraryView(title: "Ready to collect", description: "Select clipboard items in the palette, then choose Add to stack. An item can belong to several stacks.", symbol: "square.stack") }
+                        else {
+                            HSplitView {
+                                List(selection: $memberID) {
+                                    ForEach(Array(stack.memberships.enumerated()), id: \.element.itemID) { index, membership in
+                                        if let item = model.state.items.first(where: { $0.id == membership.itemID }) {
+                                            VStack(alignment: .leading, spacing: 6) {
+                                                HStack { Text("\(index + 1)").font(.caption.monospacedDigit()).foregroundStyle(.secondary); ItemRow(item: item); Spacer() }
+                                                HStack { Button { move(index: index, by: -1) } label: { Image(systemName: "arrow.up") }.disabled(index == 0).accessibilityLabel("Move \(item.textPreview) up"); Button { move(index: index, by: 1) } label: { Image(systemName: "arrow.down") }.disabled(index + 1 == stack.memberships.count).accessibilityLabel("Move \(item.textPreview) down"); if membership.associatedURL != nil { Label("Associated link", systemImage: "link").font(.caption).foregroundStyle(.secondary) } }.buttonStyle(.borderless)
+                                            }.tag(item.id).padding(.vertical, 3)
+                                        }
+                                    }
+                                }.frame(minWidth: 280, idealWidth: 320, maxWidth: max(280, geometry.size.width - 261)).accessibilityLabel("Ordered stack items")
+                                memberDetail.frame(minWidth: 260, idealWidth: 350, maxWidth: max(260, geometry.size.width - 281))
+                            }
+                        }
+                    }.frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
                 }
-                .navigationTitle(stack.name)
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Menu("Stack actions") { Button("Rename…") { rename = true }; Button("Export stack…") { selectWholeStack(); export = true }; Button("Combine stack…") { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true }; Divider(); Button("Delete stack…", role: .destructive) { confirmDeleteStack = true } }
-                    }
-                }
-            } else { EmptyLibraryView(title: "Gather what belongs together", description: "Make a named stack of excerpts, links, images or file references. Items are shared, so removing one membership leaves other stacks intact.", symbol: "square.stack.3d.up").navigationTitle("Saved stacks") }
+            } else { EmptyLibraryView(title: "Gather what belongs together", description: "Make a named stack of excerpts, links, images or file references. Items are shared, so removing one membership leaves other stacks intact.", symbol: "square.stack.3d.up") }
         }
-        .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 500).tint(WinnelStyle.accent)
         .onChange(of: memberID) { _, id in if let item = model.state.items.first(where: { $0.id == id }) { model.selectedIDs = [item.id]; model.selectionOrder = [item.id]; model.loadPreview(item.id) } }
         .onChange(of: model.selectedIDs) { _, ids in
