@@ -9,7 +9,14 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
 
 @MainActor final class AppModel: ObservableObject {
     @Published var state = LibraryState()
-    @Published var searchQuery = "" { didSet { refreshSearch(reconcileSelection: true) } }
+    @Published var searchQuery = "" {
+        didSet {
+            guard searchQuery != oldValue else { return }
+            reconcileVisibleSelection(allowedIDs: [], reset: true)
+            searchResults = []
+            refreshSearch()
+        }
+    }
     @Published var libraryScope: LibraryScope = .recent { didSet { reconcileVisibleSelection() } }
     @Published var selectedIDs: Set<UUID> = []
     @Published var selectionOrder: [UUID] = []
@@ -250,38 +257,35 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             catch { fail(error) }
         }
     }
-    private func refreshSearch(reconcileSelection: Bool = false) {
+    private func refreshSearch() {
         searchTask?.cancel()
         let query = searchQuery
         guard !lifecycleSuspended, !shuttingDown, recoveryMessage == nil else { searchResults = []; return }
         guard !query.isEmpty, let repository else {
             searchResults = state.search(query)
-            if reconcileSelection { reconcileVisibleSelection() }
             return
         }
-        if reconcileSelection { searchResults = state.search(query); reconcileVisibleSelection() }
         searchTask = Task {
             do {
                 let result = try await repository.search(query)
                 guard !Task.isCancelled, searchQuery == query else { return }
                 searchResults = result
-                if reconcileSelection { reconcileVisibleSelection() }
             }
             catch { guard !Task.isCancelled else { return }; fail(error) }
         }
     }
-    private func reconcileVisibleSelection() {
+    private func reconcileVisibleSelection(allowedIDs: Set<UUID>? = nil, reset: Bool = false) {
         let previousFirst = selectedItems.first?.id
         let previousIDs = selectedIDs
-        selectedIDs.formIntersection(visibleItems.map(\.id))
+        selectedIDs.formIntersection(allowedIDs ?? Set(visibleItems.map(\.id)))
         selectionOrder.removeAll { !selectedIDs.contains($0) }
-        if selectedIDs != previousIDs {
+        if reset || selectedIDs != previousIDs {
             combinationGeneration += 1; combinationPreview = ""
             for kind: ContentOperationKind in [.combination, .queuePreparation, .clipboard, .exportPreparation] {
                 contentSlots[kind]?.task.cancel()
             }
         }
-        guard previousFirst != selectedItems.first?.id else { return }
+        guard reset || previousFirst != selectedItems.first?.id else { return }
         previewGeneration += 1
         contentSlots[.preview]?.task.cancel()
         previewPayload = nil; previewThumbnailData = nil; previewThumbnailFinished = false

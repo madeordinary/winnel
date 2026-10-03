@@ -548,4 +548,28 @@ extension AppModelTests {
         await model.shutdown()
     }
 
+    @MainActor func testChangedQueryStartsFreshSelectionForMatchBeyondMetadataAndSameQueryPreservesReselection() async throws {
+        let (model, repo, _) = try await controlledModel()
+        let text = String(repeating: "synthetic prefix ", count: 2_000) + " tailneedle"
+        let payload = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data(text.utf8))])
+        let snapshot = try await repo.ingest(payload, source: .init(), now: Date(), sessionIDs: [])
+        let item = try XCTUnwrap(snapshot.state.items.first { !$0.searchText.contains("tailneedle") && $0.textPreview.hasPrefix("synthetic prefix") })
+        model.state = snapshot.state
+        model.selectedIDs = [item.id]; model.selectionOrder = [item.id]
+        model.loadPreview(item.id); await model.waitForContentOperations()
+        model.queue = .init(entries: [.init(item: item, payload: payload)], now: Date())
+        model.searchQuery = "tailneedle"
+        XCTAssertTrue(model.selectedIDs.isEmpty); XCTAssertTrue(model.selectionOrder.isEmpty)
+        XCTAssertNil(model.previewPayload)
+        try await settle { model.visibleItems.contains { $0.id == item.id } }
+        XCTAssertTrue(model.selectedIDs.isEmpty)
+        model.selectedIDs = [item.id]; model.selectionOrder = [item.id]
+        model.loadPreview(item.id); await model.waitForContentOperations()
+        model.searchQuery = "tailneedle"
+        XCTAssertEqual(model.selectedIDs, [item.id]); XCTAssertEqual(model.selectionOrder, [item.id])
+        XCTAssertEqual(model.previewPayload, payload)
+        XCTAssertEqual(model.queue?.entries.first?.item.id, item.id)
+        await model.shutdown()
+    }
+
 }
