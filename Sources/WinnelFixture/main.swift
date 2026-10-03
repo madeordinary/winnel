@@ -68,7 +68,9 @@ import AppKit
     }
     @objc func copyImage() {
         guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 16, pixelsHigh: 16, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 64, bitsPerPixel: 32) else { status.stringValue = "Synthetic PNG generation failed"; return }
-        for y in 0..<16 { for x in 0..<16 { bitmap.setColor((x + y) % 2 == 0 ? .systemOrange : .systemBlue, atX: x, y: y) } }
+        let orange = NSColor(deviceRed: 1, green: 0.5, blue: 0, alpha: 1)
+        let blue = NSColor(deviceRed: 0, green: 0.3, blue: 1, alpha: 1)
+        for y in 0..<16 { for x in 0..<16 { bitmap.setColor((x + y) % 2 == 0 ? orange : blue, atX: x, y: y) } }
         guard let png = bitmap.representation(using: .png, properties: [:]) else { status.stringValue = "Synthetic PNG generation failed"; return }
         editor.board.clearContents()
         status.stringValue = editor.board.setData(png, forType: .png) ? "Synthetic PNG copied: 16 × 16 pixels" : "Synthetic PNG copy failed"
