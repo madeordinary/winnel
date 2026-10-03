@@ -101,6 +101,7 @@ final class PalettePanel: NSPanel {
     @objc private func toggleCapture() { if model.captureState == .active { model.pause(until: nil) } else if !model.state.settings.captureEnabled { model.enableCapture() } else { model.resumeCapture() }; refreshMenu() }
     @objc private func quit() { NSApp.terminate(nil) }
     func showPalette() {
+        guard NSApp.modalWindow == nil else { return }
         model.capturePaletteTarget()
         if panel == nil {
             let storedSize = UserDefaults.standard.string(forKey: "paletteSize").map(NSSizeFromString) ?? NSSize(width: 620, height: 520)

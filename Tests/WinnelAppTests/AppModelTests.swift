@@ -469,4 +469,60 @@ extension AppModelTests {
         await model.shutdown()
     }
 
+    @MainActor func testScopeChangeRevokesHiddenSelectionWithoutCancellingQueue() async throws {
+        let (model, _, item) = try await controlledModel()
+        model.state.items[0].isPinned = true
+        model.state.items[0].isRecent = false
+        model.libraryScope = .pinned
+        model.loadPreview(item.id); await model.waitForContentOperations()
+        let payload = try XCTUnwrap(model.previewPayload)
+        model.queue = .init(entries: [.init(item: item, payload: payload)], now: Date())
+        model.combinationPreview = "old hidden synthetic combination"
+        model.libraryScope = .recent
+        XCTAssertTrue(model.combinationPreview.isEmpty)
+        XCTAssertTrue(model.visibleItems.isEmpty)
+        XCTAssertTrue(model.selectedIDs.isEmpty); XCTAssertTrue(model.selectionOrder.isEmpty)
+        XCTAssertNil(model.previewPayload); XCTAssertNil(model.previewThumbnailData)
+        XCTAssertEqual(model.queue?.entries.first?.item.id, item.id)
+        let count = model.pasteboardService.changeCount
+        model.copySelected(); await model.waitForContentOperations()
+        XCTAssertEqual(model.pasteboardService.changeCount, count)
+        await model.shutdown()
+    }
+    @MainActor func testScopeChangePreservesVisibleOrderAndLoadsSurvivingPreview() async throws {
+        let (model, repo, first) = try await controlledModel()
+        let nextPayload = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data("second synthetic scope item".utf8))])
+        let snapshot = try await repo.ingest(nextPayload, source: .init(), now: Date(), sessionIDs: [])
+        let next = try XCTUnwrap(snapshot.state.items.first { $0.id != first.id })
+        model.state = snapshot.state
+        model.state.items[model.state.items.firstIndex { $0.id == next.id }!].isPinned = true
+        model.selectedIDs = [first.id, next.id]; model.selectionOrder = [first.id, next.id]
+        model.loadPreview(first.id); await model.waitForContentOperations()
+        model.libraryScope = .pinned
+        await model.waitForContentOperations()
+        XCTAssertEqual(model.selectionOrder, [next.id]); XCTAssertEqual(model.selectedIDs, [next.id])
+        XCTAssertEqual(model.previewPayload, nextPayload)
+        model.libraryScope = .all
+        XCTAssertEqual(model.selectionOrder, [next.id]); XCTAssertEqual(model.previewPayload, nextPayload)
+        await model.shutdown()
+    }
+
+    @MainActor func testQueryChangeRevokesHiddenSelectionButRoutineRefreshPreservesSavedSelection() async throws {
+        let (model, repo, item) = try await controlledModel()
+        model.state.items[0].isPinned = true; model.state.items[0].isRecent = false
+        model.selectedIDs = [item.id]; model.selectionOrder = [item.id]
+        // A routine settings transaction refreshes search without changing the user's filter.
+        let refreshed = expectation(description: "Routine settings snapshot applied")
+        model.onSettingsChanged = { _ in refreshed.fulfill() }
+        model.updateSettings { $0.directPasteEnabled = false }
+        await fulfillment(of: [refreshed], timeout: 3)
+        XCTAssertEqual(model.selectedIDs, [item.id])
+        model.loadPreview(item.id); await model.waitForContentOperations()
+        model.searchQuery = "no matching synthetic text"
+        XCTAssertTrue(model.selectedIDs.isEmpty); XCTAssertNil(model.previewPayload)
+        XCTAssertTrue(model.selectionOrder.isEmpty)
+        _ = try await repo.load(now: Date())
+        await model.shutdown()
+    }
+
 }

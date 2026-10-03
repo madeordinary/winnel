@@ -9,8 +9,8 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
 
 @MainActor final class AppModel: ObservableObject {
     @Published var state = LibraryState()
-    @Published var searchQuery = "" { didSet { refreshSearch() } }
-    @Published var libraryScope: LibraryScope = .recent
+    @Published var searchQuery = "" { didSet { refreshSearch(reconcileSelection: true) } }
+    @Published var libraryScope: LibraryScope = .recent { didSet { reconcileVisibleSelection() } }
     @Published var selectedIDs: Set<UUID> = []
     @Published var selectionOrder: [UUID] = []
     @Published var queue: PasteQueue?
@@ -250,15 +250,42 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             catch { fail(error) }
         }
     }
-    private func refreshSearch() {
+    private func refreshSearch(reconcileSelection: Bool = false) {
         searchTask?.cancel()
         let query = searchQuery
         guard !lifecycleSuspended, !shuttingDown, recoveryMessage == nil else { searchResults = []; return }
-        guard !query.isEmpty, let repository else { searchResults = state.search(query); return }
+        guard !query.isEmpty, let repository else {
+            searchResults = state.search(query)
+            if reconcileSelection { reconcileVisibleSelection() }
+            return
+        }
+        if reconcileSelection { searchResults = state.search(query); reconcileVisibleSelection() }
         searchTask = Task {
-            do { let result = try await repository.search(query); guard !Task.isCancelled, searchQuery == query else { return }; searchResults = result }
+            do {
+                let result = try await repository.search(query)
+                guard !Task.isCancelled, searchQuery == query else { return }
+                searchResults = result
+                if reconcileSelection { reconcileVisibleSelection() }
+            }
             catch { guard !Task.isCancelled else { return }; fail(error) }
         }
+    }
+    private func reconcileVisibleSelection() {
+        let previousFirst = selectedItems.first?.id
+        let previousIDs = selectedIDs
+        selectedIDs.formIntersection(visibleItems.map(\.id))
+        selectionOrder.removeAll { !selectedIDs.contains($0) }
+        if selectedIDs != previousIDs {
+            combinationGeneration += 1; combinationPreview = ""
+            for kind: ContentOperationKind in [.combination, .queuePreparation, .clipboard, .exportPreparation] {
+                contentSlots[kind]?.task.cancel()
+            }
+        }
+        guard previousFirst != selectedItems.first?.id else { return }
+        previewGeneration += 1
+        contentSlots[.preview]?.task.cancel()
+        previewPayload = nil; previewThumbnailData = nil; previewThumbnailFinished = false
+        if let next = selectedItems.first?.id { loadPreview(next) }
     }
     func enableCapture() {
         guard recoveryMessage == nil else { status = "Resolve storage recovery before enabling capture."; return }
@@ -568,6 +595,8 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         let preview = combinationPreview
         runContentOperation(kind: .exportPreparation) { [self] operation in
             let panel = NSSavePanel(); panel.nameFieldStringValue = "winnel-combination.txt"; panel.message = "Export the exact combination preview."
+            prepareExportModal()
+            guard contentOperationIsCurrent(operation) else { return }
             guard panel.runModal() == .OK, let url = panel.url, contentOperationIsCurrent(operation) else { return }
             do {
                 try await detachedContent {
@@ -606,6 +635,8 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             }
             guard contentOperationIsCurrent(operation) else { return }
             let panel = NSSavePanel(); panel.nameFieldStringValue = "Winnel Export"; panel.message = "Export \(entries.count) selected items and \(document.assets.count) image assets into a new folder."
+            prepareExportModal()
+            guard contentOperationIsCurrent(operation) else { return }
             guard panel.runModal() == .OK, let url = panel.url, contentOperationIsCurrent(operation) else { return }
             let confirmation = NSAlert(); confirmation.messageText = "Export this preview?"; confirmation.informativeText = "Destination: " + url.path + "\nAssets: " + document.assets.keys.sorted().joined(separator: ", ")
             let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 600, height: 360)); scroll.hasVerticalScroller = true
@@ -656,9 +687,14 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             let snapshot = try await repository.load(now: Date()); recoveryMessage = nil; apply(snapshot); explicitPause = true; monitor.pause(); status = "Storage reopened. Resume capture when ready."
         } catch { fail(error) } }
     }
+    private func prepareExportModal() {
+        onDismissPalette?()
+        NSApp.activate(ignoringOtherApps: true)
+    }
     func exportRecovery() {
         guard vaultDirectory != nil else { return }
         let panel = NSSavePanel(); panel.nameFieldStringValue = "Winnel Encrypted Recovery"; panel.message = "Copy encrypted app storage for recovery. This includes no decrypted preview."
+        prepareExportModal()
         guard panel.runModal() == .OK, let destination = panel.url else { return }
         Task { do {
             guard let repository else { status = "Storage must be safely reopened before recovery export."; return }
