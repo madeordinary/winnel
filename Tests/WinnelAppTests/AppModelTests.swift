@@ -72,6 +72,48 @@ private actor OperationBarrier {
 }
 
 extension AppModelTests {
+    @MainActor func testIdleQueueIsRemovedAtMaintenanceNextAndBackWithoutWritingClipboard() async throws {
+        let (model, repo, item) = try await controlledModel()
+        let payload = try await repo.payload(item.id)
+        let oldDate = Date().addingTimeInterval(-PasteQueue.idleLimit - 1)
+        let count = model.pasteboardService.changeCount
+        for action in [0, 1, 2] {
+            model.queue = .init(entries: [.init(item: item, payload: payload)], mode: .paste, now: oldDate)
+            switch action {
+            case 0: model.expireQueue()
+            case 1: model.nextInQueue()
+            default: model.backInQueue()
+            }
+            await model.waitForContentOperations()
+            XCTAssertNil(model.queue)
+            XCTAssertEqual(model.status, "Queue cancelled after five minutes without interaction.")
+            XCTAssertEqual(model.pasteboardService.changeCount, count)
+        }
+        await model.shutdown()
+    }
+
+    @MainActor func testIdleExpirationRevokesScheduledQueueDispatchAndClearsAlreadyExpiredQueue() async throws {
+        let (model, repo, item) = try await controlledModel()
+        let payload = try await repo.payload(item.id)
+        let now = Date()
+        model.queue = .init(entries: [.init(item: item, payload: payload)], now: now)
+        let count = model.pasteboardService.changeCount
+        model.nextInQueue()
+        // Expire before the scheduled main-actor dispatch gets its first turn.
+        XCTAssertTrue(model.expireQueue(now: now.addingTimeInterval(PasteQueue.idleLimit + 1)))
+        await model.waitForContentOperations()
+        XCTAssertNil(model.queue)
+        XCTAssertEqual(model.pasteboardService.changeCount, count)
+        XCTAssertEqual(model.status, "Queue cancelled after five minutes without interaction.")
+
+        model.queue = .init(entries: [.init(item: item, payload: payload)], now: now)
+        model.queue?.interact(now: now.addingTimeInterval(PasteQueue.idleLimit + 1))
+        XCTAssertEqual(model.queue?.cancellation, .idle)
+        XCTAssertTrue(model.expireQueue(now: now))
+        XCTAssertNil(model.queue)
+        await model.shutdown()
+    }
+
     @MainActor private func controlledModel(payloadGate: OperationBarrier? = nil, mutationGate: OperationBarrier? = nil) async throws -> (AppModel, LibraryRepository, ClipboardItem) {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("winnel-controller-" + UUID().uuidString)
         addTeardownBlock { try? FileManager.default.removeItem(at: url) }

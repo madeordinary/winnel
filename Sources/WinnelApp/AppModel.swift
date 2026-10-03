@@ -460,12 +460,18 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             guard contentOperationIsCurrent(operation), queueGeneration == generation, !entries.isEmpty else { return }; queue = .init(entries: entries, mode: mode, now: Date()); status = "Queue ready. Next copies or sends one paste request."
         } catch { if contentOperationIsCurrent(operation), queueGeneration == generation { fail(error) } } }
     }
+    @discardableResult func expireQueue(now: Date = Date()) -> Bool {
+        guard queue?.expire(now: now) == true || queue?.cancellation == .idle else { return false }
+        cancelQueue()
+        status = "Queue cancelled after five minutes without interaction."
+        return true
+    }
     func nextInQueue() {
-        guard !queueDispatchPending, queue?.expire(now: Date()) != true, let entry = queue?.current else { return }
+        guard !expireQueue(), !queueDispatchPending, let entry = queue?.current else { return }
         let mode = queue!.mode, position = queue!.position, generation = queueGeneration
         let target = mode == .paste ? targetService.captureTarget() : nil
         runContentOperation(kind: .queueDispatch) { [self] operation in
-            guard !queueDispatchPending, queueGeneration == generation, queue?.current?.id == entry.id, queue?.position == position else { return }
+            guard !expireQueue(), !queueDispatchPending, queueGeneration == generation, queue?.current?.id == entry.id, queue?.position == position else { return }
             queueDispatchPending = true
             defer { if queueGeneration == generation { queueDispatchPending = false } }
             guard pasteboardService.write(entry.payload) else { queue?.recordDispatch(success: false, now: Date()); status = "Clipboard write failed. Queue did not advance."; return }
@@ -473,9 +479,9 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             if mode == .paste {
                 guard state.settings.directPasteEnabled, let target else { queue?.recordDispatch(success: false, now: Date()); status = "Copied for manual paste. Queue did not advance; switch to Copy Next or retry."; return }
                 let result = await targetService.waitForModifiersThenDispatch(to: target, isCurrent: { [self] in
-                    contentOperationIsCurrent(operation) && queueGeneration == generation && queue?.position == position && queue?.current?.id == entry.id && queue?.mode == mode && state.settings.directPasteEnabled && pasteboardService.changeCount == writtenCount
+                    !expireQueue() && contentOperationIsCurrent(operation) && queueGeneration == generation && queue?.position == position && queue?.current?.id == entry.id && queue?.mode == mode && state.settings.directPasteEnabled && pasteboardService.changeCount == writtenCount
                 })
-                guard contentOperationIsCurrent(operation), queueGeneration == generation, queue?.position == position, queue?.current?.id == entry.id else { return }
+                guard !expireQueue(), contentOperationIsCurrent(operation), queueGeneration == generation, queue?.position == position, queue?.current?.id == entry.id else { return }
                 guard result == .dispatched else {
                     queue?.recordDispatch(success: false, now: Date())
                     status = pasteboardService.changeCount == writtenCount ? "Copied for manual paste. Queue did not advance; switch to Copy Next or retry." : "Clipboard changed. Queue did not advance; use Next to copy this item again."
@@ -486,7 +492,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             queue?.recordDispatch(success: true, now: Date())
         }
     }
-    func backInQueue() { queueGeneration += 1; queueDispatchPending = false; queue?.back(now: Date()) }
+    func backInQueue() { guard !expireQueue() else { return }; queueGeneration += 1; queueDispatchPending = false; queue?.back(now: Date()) }
     func cancelQueue() { queueGeneration += 1; queueDispatchPending = false; queue?.cancel(); queue = nil }
     func moveSelection(_ id: UUID, offset: Int) {
         var ids = selectedItems.map(\.id); guard let index = ids.firstIndex(of: id), ids.indices.contains(index + offset) else { return }; ids.swapAt(index, index + offset); selectionOrder = ids
@@ -640,7 +646,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         Task { do { guard let repository else { return }; apply(try await repository.mutate { _ = $0.enforceRetention(now: Date()) }); if generation == captureControlGeneration { resumeIfPermitted() } } catch { fail(error) } }
     }
     private func tick() {
-        if queue?.expire(now: Date()) == true { status = "Queue cancelled after five minutes without interaction." }
+        expireQueue()
         if let until = state.settings.pauseUntil, until <= Date(), recoveryMessage == nil { explicitPause = false; resumeCapture() }
         let ids = queue?.retainedIDs ?? []
         perform { _ = $0.enforceRetention(now: Date(), sessionRetainedIDs: ids) }
