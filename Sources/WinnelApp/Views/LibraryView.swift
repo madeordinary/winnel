@@ -28,8 +28,6 @@ struct LibraryView: View {
             if let stack {
                 GeometryReader { geometry in
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack { VStack(alignment: .leading, spacing: 4) { Text(stack.name).font(.title2.bold()).lineLimit(2); Text("\(stack.memberships.count) ordered items").foregroundStyle(.secondary) }; Spacer(); Menu("Stack actions") { Button("Rename…") { rename = true }; Button("Export stack…") { selectWholeStack(); export = true }; Button("Combine stack…") { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true }; Divider(); Button("Delete stack…", role: .destructive) { confirmDeleteStack = true } } }.padding(20)
-                    Divider()
                     if stack.memberships.isEmpty { EmptyLibraryView(title: "Ready to collect", description: "Select clipboard items in the palette, then choose Add to stack. An item can belong to several stacks.", symbol: "square.stack") }
                     else {
                         HSplitView {
@@ -47,9 +45,22 @@ struct LibraryView: View {
                         }
                     }
                 }.frame(width: geometry.size.width, height: geometry.size.height)
-                }.navigationTitle(stack.name)
+                }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("\(stack.memberships.count) ordered items").foregroundStyle(.secondary).padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                        Divider()
+                    }
+                }
+                .navigationTitle(stack.name)
+                .toolbar {
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu("Stack actions") { Button("Rename…") { rename = true }; Button("Export stack…") { selectWholeStack(); export = true }; Button("Combine stack…") { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true }; Divider(); Button("Delete stack…", role: .destructive) { confirmDeleteStack = true } }
+                    }
+                }
             } else { EmptyLibraryView(title: "Gather what belongs together", description: "Make a named stack of excerpts, links, images or file references. Items are shared, so removing one membership leaves other stacks intact.", symbol: "square.stack.3d.up") }
         }
+        .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 500).tint(WinnelStyle.accent)
         .onChange(of: memberID) { _, id in if let item = model.state.items.first(where: { $0.id == id }) { model.selectedIDs = [item.id]; model.selectionOrder = [item.id]; model.loadPreview(item.id) } }
         .onChange(of: model.selectedIDs) { _, ids in
