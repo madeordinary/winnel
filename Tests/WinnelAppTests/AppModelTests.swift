@@ -156,6 +156,7 @@ extension AppModelTests {
         let count = model.pasteboardService.changeCount
         await gate.arm(); model.copySelected(); await gate.waitUntilEntered()
         model.handleLifecycleSuspension()
+        XCTAssertTrue(model.selectedIDs.isEmpty); XCTAssertTrue(model.selectionOrder.isEmpty)
         await gate.release(); await model.waitForContentOperations()
         XCTAssertEqual(model.pasteboardService.changeCount, count)
         XCTAssertEqual(model.pasteboardService.pasteboard.string(forType: .string), "new synthetic user copy")
@@ -168,6 +169,7 @@ extension AppModelTests {
         await gate.release(); await model.waitForContentOperations(); XCTAssertNil(model.queue)
         await gate.arm(); model.prepareCombination(format: .newline); await gate.waitUntilEntered()
         model.retryStorage()
+        XCTAssertTrue(model.selectedIDs.isEmpty); XCTAssertTrue(model.selectionOrder.isEmpty)
         await gate.release(); await model.waitForContentOperations()
         XCTAssertTrue(model.combinationPreview.isEmpty)
         try await settle { model.status == "Storage reopened. Resume capture when ready." }
@@ -295,6 +297,47 @@ extension AppModelTests {
         let second = try XCTUnwrap(snapshot.state.items.first { $0.id != first.id })
         model.state = snapshot.state
         model.selectedIDs = [first.id, second.id]; model.selectionOrder = [first.id, second.id]
+    }
+
+    @MainActor func testClearRecentPreservesSavedMembershipButClearsSelectionUntilDeliberateReselect() async throws {
+        let (model, repo, item) = try await controlledModel()
+        let saved = try await repo.mutate {
+            _ = try $0.setPinned(item.id, true, now: Date())
+            _ = try $0.createStack(name: "synthetic saved selection", itemIDs: [item.id])
+        }
+        model.state = saved.state
+        model.loadPreview(item.id); await model.waitForContentOperations()
+        XCTAssertNotNil(model.previewPayload)
+        XCTAssertTrue(model.previewThumbnailFinished)
+        model.combinationPreview = "synthetic cached combination"
+        model.clearRecent()
+        XCTAssertTrue(model.selectedIDs.isEmpty); XCTAssertTrue(model.selectionOrder.isEmpty)
+        XCTAssertNil(model.previewPayload); XCTAssertNil(model.previewThumbnailData)
+        XCTAssertFalse(model.previewThumbnailFinished); XCTAssertTrue(model.combinationPreview.isEmpty)
+        try await settle { model.state.recentItems.isEmpty }
+        XCTAssertEqual(model.state.items.map(\.id), [item.id])
+        XCTAssertTrue(model.state.items[0].isPinned)
+        XCTAssertEqual(model.state.stacks.first?.memberships.map(\.itemID), [item.id])
+        model.selectedIDs = [item.id]; model.selectionOrder = [item.id]
+        model.loadPreview(item.id); await model.waitForContentOperations()
+        XCTAssertEqual(model.previewPayload?.plainText, "synthetic protected content")
+        await model.shutdown()
+    }
+
+    @MainActor func testDeletingUnrelatedItemRevokesSelectionAndCachedPreview() async throws {
+        let (model, repo, selected) = try await controlledModel()
+        try await addSecondSelection(model, repo: repo, first: selected)
+        let unrelated = try XCTUnwrap(model.state.items.first { $0.id != selected.id })
+        model.selectedIDs = [selected.id]; model.selectionOrder = [selected.id]
+        model.loadPreview(selected.id); await model.waitForContentOperations()
+        XCTAssertNotNil(model.previewPayload)
+        model.deleteEverywhere(unrelated.id)
+        XCTAssertTrue(model.selectedIDs.isEmpty); XCTAssertTrue(model.selectionOrder.isEmpty)
+        XCTAssertNil(model.previewPayload); XCTAssertFalse(model.previewThumbnailFinished)
+        try await settle { model.state.items.count == 1 }
+        XCTAssertEqual(model.state.items.first?.id, selected.id)
+        XCTAssertTrue(model.selectedItems.isEmpty)
+        await model.shutdown()
     }
 
     @MainActor func testRepeatedCombinationRequestsOnlyLoadLatestSelectionAfterBlockedPredecessor() async throws {

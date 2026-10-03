@@ -38,7 +38,7 @@ if let index = CommandLine.arguments.firstIndex(of: "--diagnostics") {
     application.run()
     exit(0)
 }
-let delegate = AppDelegate(fixtureMode: CommandLine.arguments.contains("--fixture"))
+let delegate = AppDelegate(fixtureMode: CommandLine.arguments.contains("--fixture") || CommandLine.arguments.contains("--fixture-recovery"), fixtureRecovery: CommandLine.arguments.contains("--fixture-recovery"))
 application.delegate = delegate
 application.setActivationPolicy(.accessory)
 application.run()

@@ -21,6 +21,7 @@ import AppKit
     var editor: FixtureTextView!
     var status: NSTextField!
     var counter = 0
+    private var referenceDirectory: URL?
     func applicationDidFinishLaunching(_ notification: Notification) {
         let menu = NSMenu()
         let appMenu = NSMenuItem(); menu.addItem(appMenu); appMenu.submenu = NSMenu()
@@ -28,16 +29,22 @@ import AppKit
         let edit = NSMenuItem(); menu.addItem(edit); edit.submenu = NSMenu(title: "Edit")
         edit.submenu?.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
         NSApp.mainMenu = menu
-        window = NSWindow(contentRect: NSRect(x: 0,y: 0,width: 660,height: 460), styleMask: [.titled,.closable,.resizable,.miniaturizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0,y: 0,width: 660,height: 520), styleMask: [.titled,.closable,.resizable,.miniaturizable], backing: .buffered, defer: false)
         window.title = "Winnel Synthetic Fixture"
         let root = NSStackView(); root.orientation = .vertical; root.alignment = .leading; root.spacing = 14
         root.edgeInsets = NSEdgeInsets(top: 24,left: 24,bottom: 24,right: 24)
         let title = NSTextField(labelWithString: "Synthetic capture and paste destination")
         title.font = .systemFont(ofSize: 21,weight: .semibold)
         root.addArrangedSubview(title)
-        root.addArrangedSubview(NSTextField(wrappingLabelWithString: "Uses only the named Winnel fixture pasteboard. The general clipboard is never read or changed."))
+        root.addArrangedSubview(NSTextField(wrappingLabelWithString: "Copy buttons and Paste in the editor below use only the named Winnel fixture pasteboard."))
         let button = NSButton(title: "Copy next synthetic sample",target: self,action: #selector(copySample))
         button.setAccessibilityIdentifier("fixture-copy"); root.addArrangedSubview(button)
+        let representations = NSStackView(); representations.orientation = .horizontal; representations.spacing = 12
+        let imageButton = NSButton(title: "Copy synthetic PNG", target: self, action: #selector(copyImage))
+        imageButton.setAccessibilityIdentifier("fixture-copy-png"); representations.addArrangedSubview(imageButton)
+        let fileButton = NSButton(title: "Copy synthetic file reference", target: self, action: #selector(copyFileReference))
+        fileButton.setAccessibilityIdentifier("fixture-copy-file"); representations.addArrangedSubview(fileButton)
+        root.addArrangedSubview(representations)
         status = NSTextField(labelWithString: "No synthetic copies yet"); root.addArrangedSubview(status)
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.borderType = .bezelBorder
         editor = FixtureTextView(frame: .init(x: 0,y: 0,width: 600,height: 200)); editor.isRichText = false
@@ -58,6 +65,30 @@ import AppKit
         let board = editor.board
         board.clearContents(); board.setString(samples[counter % samples.count], forType: .string)
         counter += 1; status.stringValue = "Synthetic copy \(counter)"
+    }
+    @objc func copyImage() {
+        guard let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 16, pixelsHigh: 16, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 64, bitsPerPixel: 32) else { status.stringValue = "Synthetic PNG generation failed"; return }
+        for y in 0..<16 { for x in 0..<16 { bitmap.setColor((x + y) % 2 == 0 ? .systemOrange : .systemBlue, atX: x, y: y) } }
+        guard let png = bitmap.representation(using: .png, properties: [:]) else { status.stringValue = "Synthetic PNG generation failed"; return }
+        editor.board.clearContents()
+        status.stringValue = editor.board.setData(png, forType: .png) ? "Synthetic PNG copied: 16 × 16 pixels" : "Synthetic PNG copy failed"
+    }
+    @objc func copyFileReference() {
+        do {
+            if referenceDirectory == nil {
+                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("winnel-file-fixture-" + UUID().uuidString, isDirectory: true)
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+                referenceDirectory = directory
+            }
+            guard let referenceDirectory else { return }
+            let file = referenceDirectory.appendingPathComponent("Synthetic reference.txt")
+            try Data("Synthetic Winnel file reference. No personal content.\n".utf8).write(to: file, options: .atomic)
+            editor.board.clearContents()
+            status.stringValue = editor.board.setString(file.absoluteString, forType: .fileURL) ? "Synthetic file reference copied: Synthetic reference.txt" : "Synthetic file reference copy failed"
+        } catch { status.stringValue = "Synthetic file reference generation failed" }
+    }
+    func applicationWillTerminate(_ notification: Notification) {
+        if let referenceDirectory { try? FileManager.default.removeItem(at: referenceDirectory) }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 }

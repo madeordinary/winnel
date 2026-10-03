@@ -58,7 +58,7 @@ struct LibraryView: View {
                         Menu("Stack actions") { Button("Rename…") { rename = true }; Button("Export stack…") { selectWholeStack(); export = true }; Button("Combine stack…") { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true }; Divider(); Button("Delete stack…", role: .destructive) { confirmDeleteStack = true } }
                     }
                 }
-            } else { EmptyLibraryView(title: "Gather what belongs together", description: "Make a named stack of excerpts, links, images or file references. Items are shared, so removing one membership leaves other stacks intact.", symbol: "square.stack.3d.up") }
+            } else { EmptyLibraryView(title: "Gather what belongs together", description: "Make a named stack of excerpts, links, images or file references. Items are shared, so removing one membership leaves other stacks intact.", symbol: "square.stack.3d.up").navigationTitle("Saved stacks") }
         }
         .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 900, minHeight: 500).tint(WinnelStyle.accent)

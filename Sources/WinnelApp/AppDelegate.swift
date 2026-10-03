@@ -21,7 +21,7 @@ final class PalettePanel: NSPanel {
     private var quitting = false
     private var recoveryPresented = false
     private var subscriptions = Set<AnyCancellable>()
-    init(fixtureMode: Bool) { model = AppModel(fixtureMode: fixtureMode); super.init() }
+    init(fixtureMode: Bool, fixtureRecovery: Bool = false) { model = AppModel(fixtureMode: fixtureMode || fixtureRecovery, fixtureRecovery: fixtureRecovery); super.init() }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         model.onDismissPalette = { [weak self] in self?.dismissPalette() }

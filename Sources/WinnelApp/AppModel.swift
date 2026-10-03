@@ -26,6 +26,8 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     @Published private(set) var previewThumbnailFinished = false
     @Published private var searchResults: [ClipboardItem] = []
     let fixtureMode: Bool
+    let fixtureRecovery: Bool
+    private(set) var fixtureRecoverySeed: FixtureRecoverySeed?
     let pasteboardService: PasteboardService
     let targetService = PasteTargetService()
     var onDismissPalette: (() -> Void)?
@@ -73,13 +75,16 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         if reason == .permissionDenied { self.status = "Capture paused: clipboard access is denied in macOS. Review access in Settings." }
         else if reason == .permissionRequired { self.status = "Capture paused: clipboard access needs your choice. Request access in Settings." }
     })
-    init(fixtureMode: Bool = false, repository: LibraryRepository? = nil, pasteboard: NSPasteboard? = nil, performanceFixture: PerformanceFixtureSeed? = nil) {
+    init(fixtureMode: Bool = false, repository: LibraryRepository? = nil, pasteboard: NSPasteboard? = nil, performanceFixture: PerformanceFixtureSeed? = nil, fixtureRecovery: Bool = false) {
         precondition(performanceFixture == nil || (fixtureMode && pasteboard?.name.rawValue.hasPrefix("org.madeordinary.winnel.performance.") == true), "Performance data requires its isolated named pasteboard")
+        precondition(!fixtureRecovery || (fixtureMode && repository == nil && pasteboard == nil && performanceFixture == nil), "Recovery testing requires its generated temporary vault and named pasteboard")
         self.performanceFixture = performanceFixture
         self.fixtureMode = fixtureMode
+        self.fixtureRecovery = fixtureRecovery
         self.repository = repository
         self.startupComplete = repository != nil
-        pasteboardService = PasteboardService(pasteboard: pasteboard ?? (fixtureMode ? NSPasteboard(name: .init("org.madeordinary.winnel.fixture")) : .general))
+        let fixtureBoard = fixtureRecovery ? "org.madeordinary.winnel.fixture.recovery." + UUID().uuidString : "org.madeordinary.winnel.fixture"
+        pasteboardService = PasteboardService(pasteboard: pasteboard ?? (fixtureMode ? NSPasteboard(name: .init(fixtureBoard)) : .general))
         clipboardAccessStatus = pasteboardService.permissionStatus
     }
     var visibleItems: [ClipboardItem] {
@@ -104,17 +109,22 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         startupComplete = true
         do {
             let directory: URL
-            if let performanceFixture { directory = performanceFixture.directory }
-            else if fixtureMode { directory = FileManager.default.temporaryDirectory.appendingPathComponent("winnel-fixture-" + UUID().uuidString) }
+            let provider: any VaultKeyProvider
+            if fixtureRecovery {
+                let seed = try await FixtureRecovery.prepare()
+                fixtureRecoverySeed = seed; directory = seed.directory; provider = seed.keys
+            }
+            else if let performanceFixture { directory = performanceFixture.directory; provider = performanceFixture.keys }
+            else if fixtureMode { directory = FileManager.default.temporaryDirectory.appendingPathComponent("winnel-fixture-" + UUID().uuidString); provider = FixtureVaultKeys() }
             else {
                 let support = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
                 let parent = support.appendingPathComponent("org.madeordinary.winnel", isDirectory: true)
                 guard parent.deletingLastPathComponent().resolvingSymlinksInPath() == parent.deletingLastPathComponent().standardizedFileURL else { throw VaultError.unsafePath }
                 try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
                 directory = parent.appendingPathComponent("vault", isDirectory: true)
+                provider = KeychainVaultKeyProvider()
             }
             vaultDirectory = directory
-            let provider: any VaultKeyProvider = performanceFixture?.keys ?? (fixtureMode ? FixtureVaultKeys() : KeychainVaultKeyProvider())
             let repo = try LibraryRepository(directory: directory, provider: provider)
             repository = repo
             apply(try await repo.load(now: Date()))
@@ -122,7 +132,10 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             explicitPause = state.settings.capturePaused == true && state.settings.pauseUntil == nil
             resumeIfPermitted()
             if state.settings.updateChecksEnabled { checkForUpdates(automatic: true) }
-        } catch { fail(error) }
+        } catch {
+            fail(error)
+            if fixtureRecovery { status = "Synthetic recovery fixture: the in-memory key is temporarily unavailable. Retry releases only this fixture key. Capture is off." }
+        }
         retentionTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.tick() }
         }
@@ -138,6 +151,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         contentGeneration += 1; queueGeneration += 1; queueDispatchPending = false
         previewGeneration += 1; combinationGeneration += 1
         for task in contentTasks.values { task.cancel() }
+        selectedIDs.removeAll(); selectionOrder.removeAll()
         queue?.cancel(); queue = nil
         previewPayload = nil; previewThumbnailData = nil; previewThumbnailFinished = false; combinationPreview = ""
         searchTask?.cancel(); searchResults = []
@@ -366,6 +380,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     }
     func completeOnboarding() { perform({ $0.settings.onboardingComplete = true }, success: "Ready. Capture starts when you enable it.") }
     func requestAccessibility() {
+        guard !fixtureRecovery else { status = "Accessibility requests are disabled in this synthetic recovery fixture."; return }
         let granted = targetService.requestPermissionFromUserAction()
         var settings = state.settings; settings.directPasteEnabled = granted; updateSettings(settings)
         status = granted ? "Accessibility is available. Paste remains limited to validated apps." : "Accessibility has not been granted. Copy remains available."
@@ -444,7 +459,15 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     func resetStorageAfterConfirmation() { deleteAllData() }
     func deleteAllData() {
         captureControlGeneration += 1; invalidateContentOperations(); monitor.pause()
-        Task { do { guard let repository else { status = "The storage directory cannot safely be opened. Close other Winnel instances or restore directory access, then retry."; return }; apply(try await repository.reset()); recoveryMessage = nil; status = "All app content deleted. Capture is paused; resume when ready."; explicitPause = true; _ = try await repository.mutate { $0.settings.capturePaused = true } } catch { fail(error) } }
+        Task { do {
+            guard let repository else { status = "The storage directory cannot safely be opened. Close other Winnel instances or restore directory access, then retry."; return }
+            apply(try await repository.reset())
+            // Only an explicit reset of the generated fixture releases its RAM key.
+            if let fixtureRecoverySeed { await fixtureRecoverySeed.keys.release() }
+            recoveryMessage = nil; explicitPause = true
+            apply(try await repository.mutate { $0.settings.capturePaused = true })
+            status = "All app content deleted. Capture is paused; resume when ready."
+        } catch { fail(error) } }
     }
     func startQueue(mode: ItemAction = .copy) {
         let items = selectedItems
@@ -627,7 +650,11 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     }
     func retryStorage() {
         invalidateContentOperations()
-        Task { do { guard let repository else { startupComplete = false; recoveryMessage = nil; await start(); return }; let snapshot = try await repository.load(now: Date()); recoveryMessage = nil; apply(snapshot); explicitPause = true; monitor.pause(); status = "Storage reopened. Resume capture when ready." } catch { fail(error) } }
+        Task { do {
+            if let fixtureRecoverySeed { await fixtureRecoverySeed.keys.release() }
+            guard let repository else { startupComplete = false; recoveryMessage = nil; await start(); return }
+            let snapshot = try await repository.load(now: Date()); recoveryMessage = nil; apply(snapshot); explicitPause = true; monitor.pause(); status = "Storage reopened. Resume capture when ready."
+        } catch { fail(error) } }
     }
     func exportRecovery() {
         guard vaultDirectory != nil else { return }
