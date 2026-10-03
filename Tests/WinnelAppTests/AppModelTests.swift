@@ -509,7 +509,12 @@ extension AppModelTests {
 
     @MainActor func testQueryChangeRevokesHiddenSelectionButRoutineRefreshPreservesSavedSelection() async throws {
         let (model, repo, item) = try await controlledModel()
-        model.state.items[0].isPinned = true; model.state.items[0].isRecent = false
+        let saved = try await repo.mutate { state in
+            state.items[0].isPinned = true
+            _ = state.clearRecent()
+        }
+        model.state = saved.state
+        XCTAssertTrue(model.visibleItems.isEmpty)
         model.selectedIDs = [item.id]; model.selectionOrder = [item.id]
         // A routine settings transaction refreshes search without changing the user's filter.
         let refreshed = expectation(description: "Routine settings snapshot applied")
@@ -517,11 +522,29 @@ extension AppModelTests {
         model.updateSettings { $0.directPasteEnabled = false }
         await fulfillment(of: [refreshed], timeout: 3)
         XCTAssertEqual(model.selectedIDs, [item.id])
+        XCTAssertTrue(model.visibleItems.isEmpty)
         model.loadPreview(item.id); await model.waitForContentOperations()
         model.searchQuery = "no matching synthetic text"
         XCTAssertTrue(model.selectedIDs.isEmpty); XCTAssertNil(model.previewPayload)
         XCTAssertTrue(model.selectionOrder.isEmpty)
         _ = try await repo.load(now: Date())
+        await model.shutdown()
+    }
+
+    @MainActor func testScopeChangeCancelsCopyWaitingForHiddenPayload() async throws {
+        let gate = OperationBarrier()
+        let (model, _, item) = try await controlledModel(payloadGate: gate)
+        model.state.items[0].isPinned = true; model.state.items[0].isRecent = false
+        model.libraryScope = .pinned
+        let count = model.pasteboardService.changeCount
+        await gate.arm(); model.copySelected(); await gate.waitUntilEntered()
+        model.libraryScope = .recent
+        await gate.release(); await model.waitForContentOperations()
+        XCTAssertTrue(model.selectedIDs.isEmpty)
+        XCTAssertEqual(model.pasteboardService.changeCount, count)
+        XCTAssertNil(model.previewPayload)
+        XCTAssertFalse(model.state.items.isEmpty)
+        XCTAssertEqual(model.state.items.first?.id, item.id)
         await model.shutdown()
     }
 
