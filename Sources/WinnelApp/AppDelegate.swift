@@ -115,8 +115,8 @@ final class PalettePanel: NSPanel {
         panel?.makeKeyAndOrderFront(nil)
     }
     func dismissPalette() { panel?.orderOut(nil) }
-    func showLibrary() { if library == nil { library = makeWindow(title: "Saved Stacks", size: .init(width: 960, height: 680), view: LibraryView(model: model)) }; NSApp.activate(ignoringOtherApps: true); library?.makeKeyAndOrderFront(nil) }
-    func showSettings() { if settings == nil { settings = makeWindow(title: "Winnel Settings", size: .init(width: 720, height: 700), view: SettingsView(model: model)) }; NSApp.activate(ignoringOtherApps: true); settings?.makeKeyAndOrderFront(nil) }
+    func showLibrary() { dismissPalette(); if library == nil { library = makeWindow(title: "Saved Stacks", size: .init(width: 960, height: 680), view: LibraryView(model: model)) }; NSApp.activate(ignoringOtherApps: true); library?.makeKeyAndOrderFront(nil) }
+    func showSettings() { dismissPalette(); if settings == nil { settings = makeWindow(title: "Winnel Settings", size: .init(width: 720, height: 700), view: SettingsView(model: model)) }; NSApp.activate(ignoringOtherApps: true); settings?.makeKeyAndOrderFront(nil) }
     func showOnboarding() { if onboarding == nil { onboarding = makeWindow(title: "Welcome to Winnel", size: .init(width: 680, height: 580), view: OnboardingView(model: model)) }; NSApp.activate(ignoringOtherApps: true); onboarding?.makeKeyAndOrderFront(nil) }
     private func makeWindow<V: View>(title: String, size: NSSize, view: V) -> NSWindow {
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)

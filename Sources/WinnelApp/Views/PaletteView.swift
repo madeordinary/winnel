@@ -55,7 +55,9 @@ struct PaletteView: View {
         }
         .onChange(of: model.selectedIDs) { old, new in
             model.selectionOrder = model.selectionOrder.filter { new.contains($0) } + model.visibleItems.filter { new.contains($0.id) && !old.contains($0.id) && !model.selectionOrder.contains($0.id) }.map(\.id)
-            if let item = model.selectedItems.first { model.loadPreview(item.id) }
+        }
+        .onChange(of: model.selectedItems.first?.id) { _, id in
+            if let id { model.loadPreview(id) }
         }
         .onExitCommand { model.cancelQueue(); model.onDismissPalette?() }
         .sheet(isPresented: $createStack) { NamedTextSheet(title: "Create a saved stack", fieldLabel: "Stack name", actionLabel: "Create stack", initialValue: "") { model.createStack(name: $0) } }

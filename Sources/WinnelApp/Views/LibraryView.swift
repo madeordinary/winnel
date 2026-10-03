@@ -13,7 +13,10 @@ struct LibraryView: View {
     @State private var combine = false
     @State private var export = false
     private var stack: SavedStack? { model.state.stacks.first { $0.id == stackID } }
-    private var selectedMember: ClipboardItem? { model.state.items.first { $0.id == memberID } }
+    private var selectedMember: ClipboardItem? {
+        guard let memberID, model.selectedIDs == [memberID] else { return nil }
+        return model.state.items.first { $0.id == memberID }
+    }
     var body: some View {
         NavigationSplitView {
             List(model.state.stacks, selection: $stackID) { stack in
@@ -23,8 +26,9 @@ struct LibraryView: View {
             .toolbar { Button { create = true } label: { Label("New stack", systemImage: "plus") }.help("Create an empty named stack") }
         } detail: {
             if let stack {
+                GeometryReader { geometry in
                 VStack(alignment: .leading, spacing: 0) {
-                    HStack { VStack(alignment: .leading, spacing: 4) { Text(stack.name).font(.title2.bold()); Text("\(stack.memberships.count) ordered items").foregroundStyle(.secondary) }; Spacer(); Menu("Stack actions") { Button("Rename…") { rename = true }; Button("Export stack…") { selectWholeStack(); export = true }; Button("Combine stack…") { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true }; Divider(); Button("Delete stack…", role: .destructive) { confirmDeleteStack = true } } }.padding(20)
+                    HStack { VStack(alignment: .leading, spacing: 4) { Text(stack.name).font(.title2.bold()).lineLimit(2); Text("\(stack.memberships.count) ordered items").foregroundStyle(.secondary) }; Spacer(); Menu("Stack actions") { Button("Rename…") { rename = true }; Button("Export stack…") { selectWholeStack(); export = true }; Button("Combine stack…") { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true }; Divider(); Button("Delete stack…", role: .destructive) { confirmDeleteStack = true } } }.padding(20)
                     Divider()
                     if stack.memberships.isEmpty { EmptyLibraryView(title: "Ready to collect", description: "Select clipboard items in the palette, then choose Add to stack. An item can belong to several stacks.", symbol: "square.stack") }
                     else {
@@ -38,15 +42,19 @@ struct LibraryView: View {
                                         }.tag(item.id).padding(.vertical, 3)
                                     }
                                 }
-                            }.frame(minWidth: 280)
-                            memberDetail.frame(minWidth: 260)
+                            }.frame(minWidth: 280, idealWidth: 320, maxWidth: max(280, geometry.size.width - 261))
+                            memberDetail.frame(minWidth: 260, idealWidth: 350, maxWidth: max(260, geometry.size.width - 281))
                         }
                     }
+                }.frame(width: geometry.size.width, height: geometry.size.height)
                 }.navigationTitle(stack.name)
             } else { EmptyLibraryView(title: "Gather what belongs together", description: "Make a named stack of excerpts, links, images or file references. Items are shared, so removing one membership leaves other stacks intact.", symbol: "square.stack.3d.up") }
         }
-        .frame(minWidth: 800, minHeight: 500).tint(WinnelStyle.accent)
+        .frame(minWidth: 900, minHeight: 500).tint(WinnelStyle.accent)
         .onChange(of: memberID) { _, id in if let item = model.state.items.first(where: { $0.id == id }) { model.selectedIDs = [item.id]; model.selectionOrder = [item.id]; model.loadPreview(item.id) } }
+        .onChange(of: model.selectedIDs) { _, ids in
+            if let memberID, ids != [memberID] { self.memberID = nil }
+        }
         .onChange(of: stackID) { _, _ in memberID = nil }
         .sheet(isPresented: $create) { NamedTextSheet(title: "New saved stack", fieldLabel: "Stack name", actionLabel: "Create stack", initialValue: "") { name in model.selectedIDs = []; model.selectionOrder = []; model.createStack(name: name) } }
         .sheet(isPresented: $rename) { NamedTextSheet(title: "Rename stack", fieldLabel: "Stack name", actionLabel: "Save", initialValue: stack?.name ?? "") { if let id = stackID { model.renameStack(id, name: $0) } } }
