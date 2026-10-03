@@ -1,6 +1,48 @@
+# SwiftPM and generated build/release artifacts
 .build/
 .build-*/
 build/
-.DS_Store
 .swiftpm/
+DerivedData/
+*.app/
+*.dSYM/
+*.xcarchive/
+*.xcresult/
+*.dmg
+*.pkg
+*.zip
+
+# macOS and per-user Xcode settings; keep shared project settings
+.DS_Store
+._*
+xcuserdata/
 *.xcuserstate
+
+# Local environment configuration; commit only sanitized templates
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Signing identities, private keys, provisioning and Keychain files
+*.p8
+*.p12
+*.pfx
+*.pem
+*.key
+*.mobileprovision
+*.provisionprofile
+*.keychain
+*.keychain-db
+
+# App vaults, recovery ciphertext and personal exports copied into the repo
+*.sealed
+/vault/
+/local-data/
+/exports/
+
+# Raw logs stay local; reviewed synthetic verification receipts are deliberate
+*.log
+!/docs/evidence/**/*.log
+
+# Keep Package.resolved, source/tests, licenses and shared Serel memory tracked.
