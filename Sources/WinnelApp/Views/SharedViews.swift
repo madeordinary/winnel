@@ -19,8 +19,8 @@ enum WinnelStyle {
     }
     static let accent = Color(nsColor: NSColor(name: "WinnelAccent") { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(srgbRed: 0.90, green: 0.53, blue: 0.38, alpha: 1)
-            : NSColor(srgbRed: 0.69, green: 0.31, blue: 0.21, alpha: 1)
+            ? NSColor(srgbRed: 0.40, green: 0.66, blue: 1.00, alpha: 1)
+            : NSColor(srgbRed: 0.12, green: 0.36, blue: 0.78, alpha: 1)
     })
 }
 
@@ -31,9 +31,9 @@ struct WinnelSectionHeader: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             if let symbol {
-                Image(systemName: symbol).font(.title2).foregroundStyle(WinnelStyle.accent)
+                Image(systemName: symbol).font(.title2).foregroundStyle(.secondary)
                     .frame(width: 40, height: 40)
-                    .background(WinnelStyle.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                    .background(WinnelStyle.canvas, in: RoundedRectangle(cornerRadius: 12))
                     .accessibilityHidden(true)
             }
             VStack(alignment: .leading, spacing: 5) {
@@ -58,8 +58,8 @@ struct ClipTypeBadge: View {
     let kind: ClipKind
     var body: some View {
         Image(systemName: kind.symbol).font(.system(size: 18, weight: .medium))
-            .foregroundStyle(WinnelStyle.accent).frame(width: 40, height: 40)
-            .background(WinnelStyle.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+            .foregroundStyle(.secondary).frame(width: 32, height: 32)
+            .background(WinnelStyle.canvas, in: RoundedRectangle(cornerRadius: 8))
             .accessibilityHidden(true)
     }
 }
@@ -84,24 +84,24 @@ struct ItemRow: View {
     var query = ""
     var isSelected = false
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: 10) {
             ClipTypeBadge(kind: item.kind)
-            VStack(alignment: .leading, spacing: 7) {
+            VStack(alignment: .leading, spacing: 5) {
                 Text(highlighted(WinnelStyle.displayText(item.textPreview.isEmpty ? item.kind.label : item.textPreview)))
                     .font(.body.weight(.medium)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 7) {
-                    Text(item.kind.label).font(.caption.weight(.medium))
+                    Text(sourceLabel).font(.caption).lineLimit(1)
                     Spacer(minLength: 2)
                     Text(item.copiedAt, style: .relative).font(.caption).lineLimit(1)
                     if item.isPinned { Image(systemName: "pin.fill").font(.caption).accessibilityLabel("Pinned") }
                 }.foregroundStyle(.secondary)
-                Text(sourceLabel).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(item.kind.label).font(.caption2).foregroundStyle(.secondary)
             }
         }
         .padding(10)
-        .background(isSelected ? WinnelStyle.accent.opacity(0.08) : WinnelStyle.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isSelected ? WinnelStyle.accent : WinnelStyle.border, lineWidth: isSelected ? 1.5 : 0.5))
-        .padding(.vertical, 3)
+        .background(isSelected ? WinnelStyle.accent.opacity(0.08) : WinnelStyle.surface, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(isSelected ? WinnelStyle.accent : WinnelStyle.border, lineWidth: isSelected ? 1.5 : 0.5))
+        .padding(.vertical, 2)
         .accessibilityElement(children: .combine)
     }
     private var sourceLabel: String {
@@ -113,7 +113,7 @@ struct ItemRow: View {
         guard !query.isEmpty else { return result }
         var search = text.startIndex..<text.endIndex
         while let range = text.range(of: query, options: [.caseInsensitive, .diacriticInsensitive], range: search) {
-            if let attributedRange = Range(range, in: result) { result[attributedRange].backgroundColor = .yellow.opacity(0.3); result[attributedRange].font = .body.bold() }
+            if let attributedRange = Range(range, in: result) { result[attributedRange].backgroundColor = WinnelStyle.accent.opacity(0.16); result[attributedRange].font = .body.bold() }
             guard range.upperBound < text.endIndex else { break }; search = range.upperBound..<text.endIndex
         }
         return result

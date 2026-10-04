@@ -6,6 +6,8 @@ The 2026-10-04 [UI revamp](ui-revamp.md) adds content-type filtering and updates
 
 The [PRD follow-up](verification.md#prd-follow-up) fixes live onboarding practice, shortcut display, pause preservation and unavailable Combine actions. Its 131-test offline suite, optimized ad-hoc package/extraction and 31 component renders passed. Start native acceptance with onboarding opt-in → practice → Pause → Get started → still paused, then JSON export and keyboard/category/filter navigation.
 
+The [neutral palette and card Library follow-up](verification.md#neutral-palette-and-card-library-follow-up) replaces the warm accent with adaptive blue, reduces quick-panel chrome, and adds ordered Cards/List views with an optional inspector. Final source passes 131 offline tests, local package/extraction checks and 36 component renders. Native selection reveal, inspector reflow and keyboard/VoiceOver remain unverified.
+
 ## Run and reproduce
 
 From the repository root:

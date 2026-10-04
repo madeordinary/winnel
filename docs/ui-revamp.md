@@ -34,9 +34,9 @@ The choices below are design judgments derived from the reviewed materials, not 
 | Reusable collections need visible structure. | Show stack counts and member order; expose Combine and Export directly in the stack header. |
 | Combined copying and sequential use are distinct workflows. | Preserve deterministic combinations and the explicit queue with its existing position and controls. Do not start traversing history automatically. |
 | Extensive preferences need organization. | Divide Settings into Capture, Storage, Shortcuts, Privacy and General, while retaining native controls. |
-| Compact surfaces benefit from restrained chrome. | Use consistent headers, system surfaces and contextual actions; avoid introducing multiple layouts or placement preferences in this change. |
+| Compact surfaces benefit from restrained chrome. | Use consistent headers, system surfaces and contextual actions; avoid adding placement preferences. The follow-up below adds Cards/List for the Library. |
 
-## Concrete interface changes
+## Initial interface changes
 
 The palette gains a clearer header, capture-state label, prominent search field and search-clearing control. Native browse and type pickers narrow the displayed content. Selected rows have a visible border and background. The action bar brings Save stack and Combine forward, displays selection counts, and keeps the default Copy/Paste action distinct. Filtered empty states offer a route back to all types.
 
@@ -52,7 +52,26 @@ Export options use native radio choices and separate options, selected content a
 
 This change does not add cloud sync, accounts, analytics, AI, OCR, screen capture, remote link previews, inline text expansion, reminders, video behavior or automatic history sequencing. It does not expand paste compatibility or change storage and capture safety requirements.
 
-Future experiments could compare compact and spacious density, evaluate alternate collection presentations, or test a dedicated preview shortcut. Each requires a demonstrated user need, explicit scope and suitable keyboard, accessibility and lifecycle verification. These are research directions, not product commitments.
+The follow-up below adopts a second collection presentation. Rich media cards and a dedicated preview shortcut remain separate experiments requiring suitable keyboard, accessibility and lifecycle verification.
+
+## Closer visual direction and competitor comparison
+
+The initial revamp retained a large branded header, symbol-heavy rows and a warm accent. The revised direction gives content more space and reduces decorative color. It keeps native adaptive light/dark surfaces, uses cool blue for selection and primary actions, and makes ordinary type symbols neutral. The original stack icon follows the same blue accent.
+
+The October 4 follow-up visually inspected Supaste's public demonstration, Paste's homepage product image, PastePal's official adaptive-grid image and Maccy's instruction image. These are promotional examples; no competitor was installed or tested. Layout observations do not establish runtime quality or feature parity.
+
+| Reference | Visible or documented pattern | Winnel application |
+| --- | --- | --- |
+| [Supaste](https://www.supaste.com/) | The demonstration shows dark, minimal controls, compact category tabs, large content cards and blue selection borders. A separate preview gives the selected clip more space. | Reduce the quick-panel header; use neutral controls, recognizable excerpts, selected outlines and a collapsible Library inspector. |
+| [Paste](https://pasteapp.io/) | The homepage image shows a horizontal strip of visual cards, small pinboard navigation and content-specific previews with colorful headers. | Keep reusable stacks easy to find and give content more room. Avoid adding a separate header color for every item type. |
+| [PastePal](https://indiegoodies.com/pastepal) | The [adaptive-grid example](https://user-images.githubusercontent.com/2284279/288302879-cd7a4ea7-5988-4d91-8e37-600ca54b52b9.png) shows a compact sidebar, card grid and separate edge bar; its documentation describes raw and Quick Look previews. | Use a visual Library with a compact stack sidebar, while keeping retrieval in the quick panel. |
+| [Maccy](https://maccy.app/) | Its [instruction image](https://maccy.app/img/maccy/Instructions.png) shows a compact search field, short results and visible shortcuts. | Preserve the native result list, search focus and direct explicit actions in the quick panel. |
+
+The resulting Library defaults to adaptive ordered cards and provides a native Cards/List control. The inspector starts hidden and opens when a card is selected; the inspector button can hide it again. Cards show bounded metadata excerpts, item type, order, source attribution and pin status. Up/down controls preserve explicit stack ordering. The existing list remains available for native selection navigation, and the inspector retains preview, Copy, pinning, URL association and membership controls. Card selection itself does not copy or paste.
+
+The quick panel starts with search and Library/settings controls, followed by browse/type filters and a visible capture state. It retains native multiple selection and the existing Copy/Paste, combination, export and queue contracts. The palette, Library and shared controls use the same adaptive blue accent; search-match highlighting also follows it.
+
+This is a closer presentation, not full Supaste equivalence. Unselected image cards currently show metadata and a type symbol; image decoding remains in the bounded selected-preview pipeline. There is no thumbnail grid cache, horizontal shelf, remote link preview, new cloud/AI/OCR feature or expanded paste compatibility. A gallery of live image thumbnails would need a bounded loading design and separate lifecycle/performance verification.
 
 ## Verification
 

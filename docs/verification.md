@@ -72,6 +72,17 @@ Recorded 2026-10-04 after the initial UI revamp. Onboarding now displays the con
 
 Application-source fingerprint: `cb5f3bc0a7cf0c6850a6483a8b95a07dfdc1b7d8375215bb163a5f0dd6c25041`, using the same per-file method above. Executable SHA-256: `904b3ee7d6ec500cd36a37c8cac79d1a2d0ffabdb296729ccfa8926ee8445492`. Development ZIP SHA-256: `883264456dc0a85fa81432895e657a76902ac6ab01385aa079a807870ec80cd9`. Private receipts retain command exits, source hashes and earlier failed regression logs. The full PRD goal remains incomplete; the production direct-paste allowlist remains empty.
 
+## Neutral palette and card Library follow-up
+
+Recorded 2026-10-04 for the closer [visual direction and competitor comparison](ui-revamp.md#closer-visual-direction-and-competitor-comparison). Neutral system surfaces and an adaptive blue accent replace the warm treatment. The Library adds ordered Cards/List views and a collapsible inspector; the quick panel has a smaller search-first header. Review also found stale-index reorder actions; Library and selection-order handlers now resolve item identity and validate bounds at click time.
+
+- **131 XCTest tests, zero failures, exit 0**, with test-process network denied on the final source. Existing behavioral coverage remains; no new unit test claims visual or keyboard acceptance.
+- Optimized ad-hoc packaging, extracted signature verification and executable/license equality passed.
+- **36 actual SwiftUI component renders** generated from synthetic in-memory state, adding Cards/List light/dark views and a minimum card-grid view. Parent and delegated review inspected initial light/dark and minimum layouts; the final minimum Library render was inspected after scroll-to-selection hooks were added. Controls remain visible, but the initial selected card is still below the minimum offscreen viewport. Automatic selection reveal and inspector reflow need native interaction verification.
+- No native UI acceptance ran for this change. The existing app-inspection connection failure remains unresolved. Keyboard, VoiceOver, resizing/scroll input and OS integration remain open. Unselected image cards contain metadata; no thumbnail-cache or remote-preview behavior is claimed.
+
+Application-source fingerprint: `1c4a64a5816d8756da648ff37a100d67aaa84f6d5488b5a9519df3b66f3e8c0c`. Executable SHA-256: `85f9f4b22a05d6bc36b5e361aa93a18a031ef83bc6604c2c4e5da06556c88b59`. Development ZIP SHA-256: `9144540a7e9c790b217692dc94d0b8139a63dfff26631af445cba4a2961c3f1e`. The fingerprint uses the per-file method above; private receipts retain exact file hashes and command outcomes. No remote publication occurred.
+
 ## Remaining verification
 
 Use synthetic fixtures and record source revision, OS/toolchain/device, exact steps, expected versus actual output and failures. Avoid extrapolating historical observations to later binaries.

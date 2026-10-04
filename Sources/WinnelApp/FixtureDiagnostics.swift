@@ -45,6 +45,8 @@ import WinnelCore
             let views: [(String, NSSize, AnyView)] = [
                 ("palette", .init(width: 760, height: 660), AnyView(PaletteView(model: model))),
                 ("library", .init(width: 1000, height: 720), AnyView(LibraryView(model: libraryModel, initialStackID: stack.id, initialMemberID: member.id))),
+                ("library-cards", .init(width: 1000, height: 720), AnyView(LibraryView(model: libraryModel, initialStackID: stack.id))),
+                ("library-list", .init(width: 900, height: 500), AnyView(LibraryView(model: libraryModel, initialStackID: stack.id, initialMemberID: member.id, initialPresentation: .list))),
                 ("library-empty", .init(width: 900, height: 500), AnyView(LibraryView(model: model))),
                 ("export", .init(width: 540, height: 760), AnyView(ExportOptionsSheet(model: model))),
                 ("combination", .init(width: 560, height: 480), AnyView(CombinationSheet(model: model))),
@@ -65,6 +67,7 @@ import WinnelCore
         let variants: [(String, NSSize, AnyView)] = [
             ("palette-light-accessibility", .init(width: 620, height: 420), accessibilityPalette),
             ("library-light-minimum", .init(width: 900, height: 500), AnyView(LibraryView(model: libraryModel, initialStackID: stack.id, initialMemberID: member.id))),
+            ("library-cards-light-minimum", .init(width: 900, height: 500), AnyView(LibraryView(model: libraryModel, initialStackID: stack.id))),
             ("queue-light-minimum", .init(width: 620, height: 420), AnyView(PaletteView(model: queueModel))),
             ("palette-filter-empty", .init(width: 620, height: 420), AnyView(PaletteView(model: filteredModel))),
             ("palette-combine-unavailable", .init(width: 620, height: 420), AnyView(PaletteView(model: unsupportedModel))),

@@ -12,36 +12,31 @@ struct PaletteView: View {
     @FocusState private var searchFocused: Bool
     var body: some View {
         VStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
-                    Label("Winnel", systemImage: "square.stack.3d.up.fill")
-                        .font(.headline).foregroundStyle(WinnelStyle.accent)
-                    Spacer()
-                    Label(captureLabel, systemImage: model.captureState == .active ? "circle.fill" : "pause.circle")
-                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                        .accessibilityLabel(captureLabel)
-                    Button { model.onShowLibrary?() } label: { Image(systemName: "square.stack") }
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    HStack(spacing: 10) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
+                        TextField("Search clipboard…", text: $model.searchQuery)
+                            .textFieldStyle(.plain).font(.title3).focused($searchFocused)
+                            .accessibilityLabel("Search clipboard library")
+                        if !model.searchQuery.isEmpty {
+                            Button { model.searchQuery = "" } label: { Image(systemName: "xmark.circle.fill") }
+                                .buttonStyle(.plain).accessibilityLabel("Clear search")
+                        }
+                    }.padding(10).background(WinnelStyle.surface, in: RoundedRectangle(cornerRadius: 9))
+                        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(searchFocused ? WinnelStyle.accent : WinnelStyle.border, lineWidth: searchFocused ? 1 : 0.5))
+                    Button { model.onShowLibrary?() } label: { Image(systemName: "square.grid.2x2") }
                         .buttonStyle(.plain).help("Open saved stacks").accessibilityLabel("Saved stacks")
                     Menu {
+                        Text(captureLabel)
                         Button("Saved stacks") { model.onShowLibrary?() }
                         Button("Settings") { model.onShowSettings?() }
                         Divider()
                         if model.isPaused { Button("Resume capture") { model.resumeCapture() } }
                         else { Button("Pause capture for 15 minutes") { model.pause(until: Date().addingTimeInterval(900)) }; Button("Pause until I resume") { model.pause(until: nil) } }
                     } label: { Image(systemName: "ellipsis.circle") }
-                        .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Library and settings")
+                        .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Capture, library and settings")
                 }
-                HStack(spacing: 10) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
-                    TextField("Find a copy, source or stack…", text: $model.searchQuery)
-                        .textFieldStyle(.plain).font(.title3).focused($searchFocused)
-                        .accessibilityLabel("Search clipboard library")
-                    if !model.searchQuery.isEmpty {
-                        Button { model.searchQuery = "" } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.plain).accessibilityLabel("Clear search")
-                    }
-                }.padding(12).background(WinnelStyle.surface, in: RoundedRectangle(cornerRadius: 12))
-                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(searchFocused ? WinnelStyle.accent : WinnelStyle.border, lineWidth: searchFocused ? 1 : 0.5))
                 HStack(spacing: 12) {
                     Picker("Browse (search includes all items)", selection: $model.libraryScope) {
                         Text("Recent").tag(LibraryScope.recent)
@@ -54,8 +49,10 @@ struct PaletteView: View {
                         Text("All types").tag(ClipKind?.none)
                         ForEach(ClipKind.allCases, id: \.self) { Text($0.label).tag(Optional($0)) }
                     }.labelsHidden().frame(width: 115).accessibilityLabel("Filter content type")
+                    Label(captureLabel, systemImage: model.captureState == .active ? "circle.fill" : "pause.circle")
+                        .font(.caption2).foregroundStyle(.secondary).fixedSize().accessibilityLabel(captureLabel)
                 }
-            }.padding(16)
+            }.padding(14)
             Divider()
             if model.recoveryMessage != nil {
                 ScrollView { RecoveryView(model: model).frame(maxWidth: .infinity, alignment: .leading) }
@@ -72,7 +69,7 @@ struct PaletteView: View {
                         Text("Combine supports text and links. Images and file references can be saved or exported.")
                             .font(.caption).foregroundStyle(.secondary)
                     }
-                }.padding(.horizontal, 16).padding(.vertical, 12)
+                }.padding(.horizontal, 14).padding(.vertical, 10)
                 if model.queue != nil { Divider(); QueueStatusView(model: model).padding(12).background(WinnelStyle.accent.opacity(0.05)) }
             }
             if !model.status.isEmpty { Text(model.status).font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.bottom, 10).accessibilityLabel("Status: \(model.status)") }
@@ -121,7 +118,7 @@ struct PaletteView: View {
                     Button(item.isPinned ? "Unpin" : "Pin") { model.togglePin(item.id) }
                     Button("Delete everywhere…", role: .destructive) { deleteItem = item }
                 }
-            }.listStyle(.plain).scrollContentBackground(.hidden).padding(.horizontal, 6)
+            }.listStyle(.plain).scrollContentBackground(.hidden).padding(.horizontal, 4)
                 .accessibilityLabel("Clipboard items. Hold Command to select several.")
         }
     }
@@ -251,12 +248,17 @@ struct SelectionOrderSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             WinnelSectionHeader(title: "Selection order", subtitle: "Combinations and queues use this order.", symbol: "list.number")
             List { ForEach(Array(model.selectedItems.enumerated()), id: \.element.id) { index, item in
-                HStack { Text("\(index + 1)."); Text(item.textPreview).lineLimit(2); Spacer(); Button { move(index, -1) } label: { Image(systemName: "arrow.up") }.disabled(index == 0).accessibilityLabel("Move item up"); Button { move(index, 1) } label: { Image(systemName: "arrow.down") }.disabled(index + 1 == model.selectedItems.count).accessibilityLabel("Move item down") }
+                HStack { Text("\(index + 1)."); Text(item.textPreview).lineLimit(2); Spacer(); Button { move(item.id, -1) } label: { Image(systemName: "arrow.up") }.disabled(index == 0).accessibilityLabel("Move item up"); Button { move(item.id, 1) } label: { Image(systemName: "arrow.down") }.disabled(index + 1 == model.selectedItems.count).accessibilityLabel("Move item down") }
             } }
             HStack { Spacer(); Button("Done") { dismiss() }.keyboardShortcut(.defaultAction) }
         }.padding(24).frame(minWidth: 480, minHeight: 340)
     }
-    private func move(_ index: Int, _ offset: Int) { var ids = model.selectedItems.map(\.id); ids.swapAt(index, index + offset); model.selectionOrder = ids }
+    private func move(_ itemID: UUID, _ offset: Int) {
+        var ids = model.selectedItems.map(\.id)
+        guard let index = ids.firstIndex(of: itemID), ids.indices.contains(index + offset) else { return }
+        ids.swapAt(index, index + offset)
+        model.selectionOrder = ids
+    }
 }
 
 struct CombinationSheet: View {

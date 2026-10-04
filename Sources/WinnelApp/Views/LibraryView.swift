@@ -12,10 +12,15 @@ struct LibraryView: View {
     @State private var confirmDeleteItem = false
     @State private var combine = false
     @State private var export = false
-    init(model: AppModel, initialStackID: UUID? = nil, initialMemberID: UUID? = nil) {
+    @State private var presentation: MemberPresentation
+    @State private var inspectorVisible: Bool
+    enum MemberPresentation: String, CaseIterable { case cards = "Cards", list = "List" }
+    init(model: AppModel, initialStackID: UUID? = nil, initialMemberID: UUID? = nil, initialPresentation: MemberPresentation = .cards) {
         self.model = model
         _stackID = State(initialValue: initialStackID)
         _memberID = State(initialValue: initialMemberID)
+        _presentation = State(initialValue: initialPresentation)
+        _inspectorVisible = State(initialValue: initialMemberID != nil)
     }
     private var stack: SavedStack? { model.state.stacks.first { $0.id == stackID } }
     private var stackCanCombine: Bool {
@@ -30,48 +35,51 @@ struct LibraryView: View {
     var body: some View {
         HSplitView {
             VStack(alignment: .leading, spacing: 0) {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "square.stack.3d.up.fill")
-                            .font(.title2).foregroundStyle(WinnelStyle.accent).accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("Winnel").font(.title2.bold())
-                            Text("Saved stacks").font(.callout).foregroundStyle(.secondary)
-                        }
-                    }
-                    Button { create = true } label: { Label("New stack", systemImage: "plus") }
-                        .help("Create an empty named stack")
+                HStack(spacing: 8) {
+                    Image(systemName: "square.stack.3d.up").foregroundStyle(.secondary).accessibilityHidden(true)
+                    Text("Saved stacks").font(.headline)
+                    Spacer()
+                    Button { create = true } label: { Image(systemName: "plus") }
+                        .buttonStyle(.borderless).help("Create an empty named stack").accessibilityLabel("New stack")
                 }.padding(16)
                 Divider()
                 List(model.state.stacks, selection: $stackID) { stack in
-                    HStack(spacing: 10) {
-                        Image(systemName: "square.stack")
-                            .foregroundStyle(WinnelStyle.accent).frame(width: 30, height: 30)
-                            .background(WinnelStyle.surface, in: RoundedRectangle(cornerRadius: 8))
-                            .accessibilityHidden(true)
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.stack").foregroundStyle(.secondary).accessibilityHidden(true)
                         Text(stack.name).lineLimit(2).foregroundStyle(Color(nsColor: .labelColor))
                         Spacer(minLength: 4)
                         Text("\(stack.memberships.count)").font(.caption.monospacedDigit())
                             .foregroundStyle(Color(nsColor: .secondaryLabelColor))
-                            .accessibilityLabel("\(stack.memberships.count) \(stack.memberships.count == 1 ? "item" : "items")")
-                    }.padding(10)
+                            .accessibilityLabel("\(stack.memberships.count) items")
+                    }.padding(.horizontal, 8).padding(.vertical, 6)
                         .background {
-                            RoundedRectangle(cornerRadius: 10).fill(WinnelStyle.surface)
-                                .overlay(RoundedRectangle(cornerRadius: 10).fill(stackID == stack.id ? WinnelStyle.accent.opacity(0.10) : Color.clear))
+                            if stackID == stack.id {
+                                RoundedRectangle(cornerRadius: 6).fill(WinnelStyle.surface)
+                                    .overlay(RoundedRectangle(cornerRadius: 6).fill(WinnelStyle.accent.opacity(0.10)))
+                            }
                         }
-                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(stackID == stack.id ? WinnelStyle.accent : WinnelStyle.border, lineWidth: stackID == stack.id ? 1.5 : 0.5))
+                        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(stackID == stack.id ? WinnelStyle.accent.opacity(0.65) : Color.clear, lineWidth: 1))
                         .tag(stack.id).accessibilityElement(children: .combine)
-                        .listRowSeparator(.hidden)
-                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden).listRowBackground(Color.clear)
                 }.listStyle(.plain).scrollContentBackground(.hidden).accessibilityLabel("Saved stacks")
                 Text("\(model.state.stacks.count) saved \(model.state.stacks.count == 1 ? "stack" : "stacks")")
                     .font(.caption).foregroundStyle(.secondary).padding(16)
-            }.background(WinnelStyle.canvas).frame(minWidth: 220, idealWidth: 250, maxWidth: 280)
+            }.background(WinnelStyle.canvas).frame(minWidth: 180, idealWidth: 210, maxWidth: 240)
             if let stack {
                 GeometryReader { geometry in
                     VStack(alignment: .leading, spacing: 0) {
-                        VStack(alignment: .leading, spacing: 14) {
-                            WinnelSectionHeader(title: stack.name, subtitle: "\(stack.memberships.count) ordered \(stack.memberships.count == 1 ? "item" : "items")", symbol: "square.stack")
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Text(stack.name).font(.title3.weight(.semibold)).lineLimit(2)
+                                Text("\(stack.memberships.count) items").font(.caption).foregroundStyle(.secondary)
+                                Spacer()
+                                Picker("View", selection: $presentation) {
+                                    ForEach(MemberPresentation.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                                }.pickerStyle(.segmented).frame(width: 125)
+                                Toggle(isOn: $inspectorVisible) { Image(systemName: "sidebar.right") }
+                                    .toggleStyle(.button).help("Show or hide item inspector")
+                                    .accessibilityLabel("Item inspector")
+                            }
                             HStack(spacing: 10) {
                                 Button { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true } label: {
                                     Label("Combine…", systemImage: "text.badge.plus")
@@ -90,28 +98,18 @@ struct LibraryView: View {
                                 Text("Combine supports text and links. This stack includes an unsupported item; you can still export the stack.")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
-                        }.padding(20).background(WinnelStyle.surface)
+                        }.padding(16).background(WinnelStyle.surface)
                         Divider()
                         if stack.memberships.isEmpty { EmptyLibraryView(title: "Ready to collect", description: "Select clipboard items in the palette, then choose Add to stack. An item can belong to several stacks.", symbol: "square.stack") }
                         else {
                             HSplitView {
-                                List(selection: $memberID) {
-                                    ForEach(Array(stack.memberships.enumerated()), id: \.element.itemID) { index, membership in
-                                        if let item = model.state.items.first(where: { $0.id == membership.itemID }) {
-                                            VStack(alignment: .leading, spacing: 6) {
-                                                HStack(alignment: .top, spacing: 10) {
-                                                    Text("\(index + 1)").font(.caption.monospacedDigit())
-                                                        .foregroundStyle(.secondary).frame(width: 20).padding(.top, 8)
-                                                    ItemRow(item: item, isSelected: memberID == item.id)
-                                                }
-                                                HStack { Button { move(index: index, by: -1) } label: { Image(systemName: "arrow.up") }.disabled(index == 0).accessibilityLabel("Move \(item.textPreview) up"); Button { move(index: index, by: 1) } label: { Image(systemName: "arrow.down") }.disabled(index + 1 == stack.memberships.count).accessibilityLabel("Move \(item.textPreview) down"); if membership.associatedURL != nil { Label("Associated link", systemImage: "link").font(.caption).foregroundStyle(.secondary) } }.buttonStyle(.borderless)
-                                            }.tag(item.id).padding(.vertical, 3)
-                                                .listRowSeparator(.hidden)
-                                                .listRowBackground(Color.clear)
-                                        }
-                                    }
-                                }.listStyle(.plain).scrollContentBackground(.hidden).frame(minWidth: 280, idealWidth: 320, maxWidth: max(280, geometry.size.width - 261)).accessibilityLabel("Ordered stack items")
-                                memberDetail.frame(minWidth: 260, idealWidth: 350, maxWidth: max(260, geometry.size.width - 281))
+                                Group {
+                                    if presentation == .cards { memberCards(stack) }
+                                    else { memberList(stack) }
+                                }.frame(minWidth: 280, maxWidth: .infinity)
+                                if inspectorVisible {
+                                    memberDetail.frame(minWidth: 280, idealWidth: 310, maxWidth: max(280, geometry.size.width - 281))
+                                }
                             }
                         }
                     }.frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
@@ -132,6 +130,83 @@ struct LibraryView: View {
         .sheet(isPresented: $export) { ExportOptionsSheet(model: model, stackID: stackID) }
         .alert("Delete this stack?", isPresented: $confirmDeleteStack) { Button("Cancel", role: .cancel) {}; Button("Delete stack", role: .destructive) { if let id = stackID { model.deleteStack(id) }; stackID = nil } } message: { Text("Only this stack is removed. Pins, other stack memberships and eligible recent items remain. Items past retention with no remaining saved reference are released.") }
         .alert("Delete this item everywhere?", isPresented: $confirmDeleteItem) { Button("Cancel", role: .cancel) {}; Button("Delete everywhere", role: .destructive) { if let id = memberID { model.deleteEverywhere(id) }; memberID = nil } } message: { Text("Remove from recent history, pins and all affected stacks: \(memberID.map { model.state.affectedStacks(for: $0).map(\.name).joined(separator: ", ") } ?? ""). Original files and exports remain.") }
+    }
+    private func memberCards(_ stack: SavedStack) -> some View {
+        ScrollViewReader { proxy in
+        ScrollView {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180, maximum: 260), spacing: 12)], spacing: 12) {
+                ForEach(Array(stack.memberships.enumerated()), id: \.element.itemID) { index, membership in
+                    if let item = model.state.items.first(where: { $0.id == membership.itemID }) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Button {
+                                memberID = item.id
+                                inspectorVisible = true
+                            } label: {
+                                VStack(alignment: .leading, spacing: 12) {
+                                    HStack {
+                                        Label(item.kind.label, systemImage: item.kind.symbol).font(.caption.weight(.medium))
+                                        Spacer()
+                                        Text("\(index + 1)").font(.caption.monospacedDigit())
+                                    }.foregroundStyle(.secondary)
+                                    Text(WinnelStyle.displayText(item.textPreview.isEmpty ? item.kind.label : item.textPreview))
+                                        .font(.body).lineLimit(5).frame(maxWidth: .infinity, minHeight: 86, alignment: .topLeading)
+                                    HStack {
+                                        Text(item.source.name ?? "Unknown source").lineLimit(1)
+                                        if item.source.confidence == .inferred { Text("(inferred)") }
+                                        Spacer(minLength: 0)
+                                        if item.isPinned { Image(systemName: "pin.fill") }
+                                    }.font(.caption).foregroundStyle(.secondary)
+                                }.foregroundStyle(Color(nsColor: .labelColor))
+                                    .frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
+                                .accessibilityLabel("Item \(index + 1), \(item.kind.label): \(WinnelStyle.displayText(item.textPreview))")
+                                .accessibilityHint("Select and open the item inspector. This does not copy the item.")
+                                .accessibilityAddTraits(memberID == item.id ? .isSelected : [])
+                            HStack {
+                                reorderButtons(stackID: stack.id, itemID: item.id, index: index, count: stack.memberships.count)
+                                Spacer()
+                                if membership.associatedURL != nil {
+                                    Image(systemName: "link").foregroundStyle(.secondary).accessibilityLabel("Associated link")
+                                }
+                            }
+                        }.padding(14).background(WinnelStyle.surface, in: RoundedRectangle(cornerRadius: 10))
+                            .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(memberID == item.id ? WinnelStyle.accent : WinnelStyle.border, lineWidth: memberID == item.id ? 1.5 : 0.5))
+                            .id(item.id)
+                    }
+                }
+            }.padding(16)
+        }.accessibilityLabel("Ordered stack cards")
+            .accessibilityHint("Use Tab to reach cards and actions; use List for arrow-key navigation.")
+            .onAppear { if let memberID { proxy.scrollTo(memberID, anchor: .center) } }
+            .onChange(of: memberID) { _, id in if let id { proxy.scrollTo(id, anchor: .center) } }
+            .onChange(of: inspectorVisible) { _, _ in if let memberID { proxy.scrollTo(memberID, anchor: .center) } }
+        }
+    }
+    private func memberList(_ stack: SavedStack) -> some View {
+        List(selection: $memberID) {
+            ForEach(Array(stack.memberships.enumerated()), id: \.element.itemID) { index, membership in
+                if let item = model.state.items.first(where: { $0.id == membership.itemID }) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(alignment: .top, spacing: 10) {
+                            Text("\(index + 1)").font(.caption.monospacedDigit()).foregroundStyle(.secondary).frame(width: 20).padding(.top, 8)
+                            ItemRow(item: item, isSelected: memberID == item.id)
+                        }
+                        HStack {
+                            reorderButtons(stackID: stack.id, itemID: item.id, index: index, count: stack.memberships.count)
+                            if membership.associatedURL != nil { Label("Associated link", systemImage: "link").font(.caption).foregroundStyle(.secondary) }
+                        }
+                    }.tag(item.id).padding(.vertical, 3).listRowSeparator(.hidden).listRowBackground(Color.clear)
+                }
+            }
+        }.listStyle(.plain).scrollContentBackground(.hidden).accessibilityLabel("Ordered stack items")
+    }
+    private func reorderButtons(stackID: UUID, itemID: UUID, index: Int, count: Int) -> some View {
+        HStack(spacing: 8) {
+            Button { move(stackID: stackID, itemID: itemID, by: -1) } label: { Image(systemName: "arrow.up") }
+                .disabled(index == 0).accessibilityLabel("Move item \(index + 1) up")
+            Button { move(stackID: stackID, itemID: itemID, by: 1) } label: { Image(systemName: "arrow.down") }
+                .disabled(index + 1 == count).accessibilityLabel("Move item \(index + 1) down")
+        }.buttonStyle(.borderless)
     }
     @ViewBuilder private var memberDetail: some View {
         if let item = selectedMember {
@@ -181,7 +256,13 @@ struct LibraryView: View {
         } else { EmptyLibraryView(title: "Inspect a saved item", description: "Select an item to copy it, pin it or associate a URL.", symbol: "doc.text.magnifyingglass") }
     }
     private func selectWholeStack() { let ids = stack?.memberships.map(\.itemID) ?? []; model.selectedIDs = Set(ids); model.selectionOrder = ids }
-    private func move(index: Int, by offset: Int) { guard let stack else { return }; var ids = stack.memberships.map(\.itemID); ids.swapAt(index, index + offset); model.reorderStack(stack.id, itemIDs: ids) }
+    private func move(stackID: UUID, itemID: UUID, by offset: Int) {
+        guard let stack, stack.id == stackID else { return }
+        var ids = stack.memberships.map(\.itemID)
+        guard let index = ids.firstIndex(of: itemID), ids.indices.contains(index + offset) else { return }
+        ids.swapAt(index, index + offset)
+        model.reorderStack(stack.id, itemIDs: ids)
+    }
 }
 
 struct AssociationSheet: View {
