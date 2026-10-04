@@ -18,6 +18,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         }
     }
     @Published var libraryScope: LibraryScope = .recent { didSet { reconcileVisibleSelection() } }
+    @Published var kindFilter: ClipKind? { didSet { if kindFilter != oldValue { reconcileVisibleSelection() } } }
     @Published var selectedIDs: Set<UUID> = []
     @Published var selectionOrder: [UUID] = []
     @Published var queue: PasteQueue?
@@ -95,12 +96,16 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         clipboardAccessStatus = pasteboardService.permissionStatus
     }
     var visibleItems: [ClipboardItem] {
-        if !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return searchResults }
-        switch libraryScope {
-        case .recent: return state.recentItems
-        case .pinned: return state.items.filter(\.isPinned).sorted { $0.copiedAt > $1.copiedAt }
-        case .all: return state.items.sorted { $0.copiedAt > $1.copiedAt }
+        let items: [ClipboardItem]
+        if !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { items = searchResults }
+        else {
+            switch libraryScope {
+            case .recent: items = state.recentItems
+            case .pinned: items = state.items.filter(\.isPinned).sorted { $0.copiedAt > $1.copiedAt }
+            case .all: items = state.items.sorted { $0.copiedAt > $1.copiedAt }
+            }
         }
+        return kindFilter.map { kind in items.filter { $0.kind == kind } } ?? items
     }
     var selectedItems: [ClipboardItem] {
         let ordered = selectionOrder.filter { selectedIDs.contains($0) }

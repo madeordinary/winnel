@@ -3,6 +3,9 @@ import WinnelCore
 
 /// Native adaptive surfaces keep system contrast, text scaling and VoiceOver behavior.
 enum WinnelStyle {
+    static let canvas = Color(nsColor: .windowBackgroundColor)
+    static let surface = Color(nsColor: .controlBackgroundColor)
+    static let border = Color(nsColor: .separatorColor)
     static func displayText(_ text: String) -> String {
         let controls: Set<UInt32> = [0x061C, 0x200E, 0x200F, 0x202A, 0x202B, 0x202C, 0x202D, 0x202E, 0x2066, 0x2067, 0x2068, 0x2069]
         guard text.unicodeScalars.contains(where: { controls.contains($0.value) }) else { return text }
@@ -19,6 +22,46 @@ enum WinnelStyle {
             ? NSColor(srgbRed: 0.90, green: 0.53, blue: 0.38, alpha: 1)
             : NSColor(srgbRed: 0.69, green: 0.31, blue: 0.21, alpha: 1)
     })
+}
+
+struct WinnelSectionHeader: View {
+    let title: String
+    var subtitle: String? = nil
+    var symbol: String? = nil
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            if let symbol {
+                Image(systemName: symbol).font(.title2).foregroundStyle(WinnelStyle.accent)
+                    .frame(width: 40, height: 40)
+                    .background(WinnelStyle.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                    .accessibilityHidden(true)
+            }
+            VStack(alignment: .leading, spacing: 5) {
+                Text(title).font(.title2.weight(.semibold)).accessibilityAddTraits(.isHeader)
+                if let subtitle { Text(subtitle).font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
+            }
+        }
+    }
+}
+
+struct WinnelCard<Content: View>: View {
+    @ViewBuilder let content: Content
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) { content }
+            .frame(maxWidth: .infinity, alignment: .leading).padding(16)
+            .background(WinnelStyle.surface, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(WinnelStyle.border, lineWidth: 0.5))
+    }
+}
+
+struct ClipTypeBadge: View {
+    let kind: ClipKind
+    var body: some View {
+        Image(systemName: kind.symbol).font(.system(size: 18, weight: .medium))
+            .foregroundStyle(WinnelStyle.accent).frame(width: 40, height: 40)
+            .background(WinnelStyle.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
+            .accessibilityHidden(true)
+    }
 }
 
 extension ClipKind {
@@ -39,20 +82,26 @@ extension CombinationFormat {
 struct ItemRow: View {
     let item: ClipboardItem
     var query = ""
+    var isSelected = false
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: item.kind.symbol).foregroundStyle(WinnelStyle.accent).frame(width: 22).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 5) {
-                Text(highlighted(WinnelStyle.displayText(item.textPreview.isEmpty ? item.kind.label : item.textPreview))).lineLimit(2)
+        HStack(alignment: .top, spacing: 12) {
+            ClipTypeBadge(kind: item.kind)
+            VStack(alignment: .leading, spacing: 7) {
+                Text(highlighted(WinnelStyle.displayText(item.textPreview.isEmpty ? item.kind.label : item.textPreview)))
+                    .font(.body.weight(.medium)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 7) {
-                    Text(item.kind.label).font(.caption).padding(.horizontal, 6).padding(.vertical, 2).background(.quaternary, in: Capsule())
-                    Text(sourceLabel).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    Text(item.copiedAt, style: .relative).font(.caption).foregroundStyle(.secondary)
+                    Text(item.kind.label).font(.caption.weight(.medium))
+                    Spacer(minLength: 2)
+                    Text(item.copiedAt, style: .relative).font(.caption).lineLimit(1)
                     if item.isPinned { Image(systemName: "pin.fill").font(.caption).accessibilityLabel("Pinned") }
-                }
+                }.foregroundStyle(.secondary)
+                Text(sourceLabel).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
         }
-        .padding(.vertical, 5)
+        .padding(10)
+        .background(isSelected ? WinnelStyle.accent.opacity(0.08) : WinnelStyle.surface, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(isSelected ? WinnelStyle.accent : WinnelStyle.border, lineWidth: isSelected ? 1.5 : 0.5))
+        .padding(.vertical, 3)
         .accessibilityElement(children: .combine)
     }
     private var sourceLabel: String {
@@ -76,11 +125,16 @@ struct EmptyLibraryView: View {
     let description: String
     let symbol: String
     var body: some View {
-        VStack(spacing: 12) {
-            Image(systemName: symbol).font(.system(size: 34)).foregroundStyle(.secondary).accessibilityHidden(true)
-            Text(title).font(.title3.bold())
-            Text(description).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 360)
-        }.padding(30).frame(maxWidth: .infinity, maxHeight: .infinity)
+        GeometryReader { geometry in
+            ScrollView {
+                VStack(spacing: 12) {
+                    Image(systemName: symbol).font(.system(size: 28, weight: .light)).foregroundStyle(WinnelStyle.accent)
+                        .frame(width: 64, height: 64).background(WinnelStyle.accent.opacity(0.08), in: RoundedRectangle(cornerRadius: 20)).accessibilityHidden(true)
+                    Text(title).font(.title3.weight(.semibold)).multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+                    Text(description).foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 360).fixedSize(horizontal: false, vertical: true)
+                }.padding(24).frame(maxWidth: .infinity, minHeight: geometry.size.height)
+            }
+        }
     }
 }
 
@@ -93,7 +147,7 @@ struct ItemMetadataView: View {
             GridRow { Text("Source").foregroundStyle(.secondary); Text(item.source.name ?? "Unknown") }
             if item.source.confidence == .inferred { GridRow { Text("Attribution").foregroundStyle(.secondary); Text("Inferred from app activity") } }
             GridRow { Text("Payload").foregroundStyle(.secondary); Text(ByteCountFormatter.string(fromByteCount: Int64(item.payloadByteCount), countStyle: .file)) }
-        }.font(.callout)
+        }.font(.callout).frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

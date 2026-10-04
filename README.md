@@ -8,6 +8,8 @@ The local goal remains incomplete. PRD v1.2 accepts clipboard-provider allocatio
 
 Attempt 7 on exact `5905897` completed with exit 0 after 1800.3767955416697 seconds, mean CPU 0.1353669968439444% of one core and peak sampled RSS 116.46875 MiB; capture remained active and no recovery state was present. [Recorded verification](docs/verification.md#performance) preserves source and executable provenance; raw receipts remain local. Hosted probes omit AppDelegate/global shortcuts; reference-device acceptance, true cold launch and shortcut-to-visible timing remain unverified. Historical interrupted runs remain documented. [Measurement scope](docs/verification.md#performance) distinguishes each binary's results from reference-device acceptance.
 
+The [UI revamp review](docs/ui-revamp.md) explains the visual direction, content-type filter, visible stack actions, categorized Settings and revised export layout. Its [verification record](docs/verification.md#ui-revamp-verification) separates passing tests and rendered layouts from still-unverified native interactions.
+
 ## Build and run
 
 Requires Apple silicon and the existing Xcode 27.0 toolchain (Swift 6.4, macOS SDK 27.0). Deployment target is macOS 14; compiling for that target does not establish runtime compatibility on macOS 14.

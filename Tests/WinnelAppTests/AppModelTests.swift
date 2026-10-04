@@ -572,4 +572,47 @@ extension AppModelTests {
         await model.shutdown()
     }
 
+    @MainActor func testTypeFilterRevokesPendingHiddenCopyAndPreservesQueue() async throws {
+        let gate = OperationBarrier()
+        let (model, _, item) = try await controlledModel(payloadGate: gate)
+        let payload = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data("synthetic queue".utf8))])
+        model.queue = .init(entries: [.init(item: item, payload: payload)], now: Date())
+        model.combinationPreview = "old combination"
+        let count = model.pasteboardService.changeCount
+        await gate.arm(); model.copySelected(); await gate.waitUntilEntered()
+        model.kindFilter = .image
+        await gate.release(); await model.waitForContentOperations()
+        XCTAssertTrue(model.visibleItems.isEmpty)
+        XCTAssertTrue(model.selectedIDs.isEmpty); XCTAssertTrue(model.selectionOrder.isEmpty)
+        XCTAssertNil(model.previewPayload); XCTAssertTrue(model.combinationPreview.isEmpty)
+        XCTAssertEqual(model.pasteboardService.changeCount, count)
+        XCTAssertEqual(model.queue?.entries.first?.item.id, item.id)
+        model.kindFilter = nil
+        XCTAssertTrue(model.visibleItems.contains { $0.id == item.id })
+        XCTAssertTrue(model.selectedIDs.isEmpty)
+        await model.shutdown()
+    }
+
+    @MainActor func testTypeFilterNarrowsPayloadSearchAndKeepsMatchingSelection() async throws {
+        let (model, repo, first) = try await controlledModel()
+        let url = ClipPayload(representations: [.init(type: "public.url", data: Data("https://example.com/synthetic".utf8))])
+        let snapshot = try await repo.ingest(url, source: .init(), now: Date(), sessionIDs: [])
+        model.state = snapshot.state
+        let link = try XCTUnwrap(model.state.items.first { $0.kind == .url })
+        model.kindFilter = .url
+        model.searchQuery = "synthetic"
+        try await settle { model.visibleItems.contains { $0.id == link.id } }
+        XCTAssertEqual(model.visibleItems.map(\.id), [link.id])
+        model.selectedIDs = [link.id]; model.selectionOrder = [link.id]
+        model.loadPreview(link.id); await model.waitForContentOperations()
+        model.kindFilter = nil
+        XCTAssertEqual(model.selectedIDs, [link.id]); XCTAssertEqual(model.selectionOrder, [link.id])
+        XCTAssertEqual(model.previewPayload, url)
+        model.kindFilter = .text
+        XCTAssertFalse(model.visibleItems.contains { $0.id == link.id })
+        XCTAssertTrue(model.visibleItems.contains { $0.id == first.id })
+        XCTAssertTrue(model.selectedIDs.isEmpty); XCTAssertNil(model.previewPayload)
+        await model.shutdown()
+    }
+
 }

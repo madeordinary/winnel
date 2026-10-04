@@ -12,6 +12,11 @@ struct LibraryView: View {
     @State private var confirmDeleteItem = false
     @State private var combine = false
     @State private var export = false
+    init(model: AppModel, initialStackID: UUID? = nil, initialMemberID: UUID? = nil) {
+        self.model = model
+        _stackID = State(initialValue: initialStackID)
+        _memberID = State(initialValue: initialMemberID)
+    }
     private var stack: SavedStack? { model.state.stacks.first { $0.id == stackID } }
     private var selectedMember: ClipboardItem? {
         guard let memberID, model.selectedIDs == [memberID] else { return nil }
@@ -21,26 +26,62 @@ struct LibraryView: View {
         HSplitView {
             VStack(alignment: .leading, spacing: 0) {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text("Saved stacks").font(.title2.bold())
+                    HStack(spacing: 10) {
+                        Image(systemName: "square.stack.3d.up.fill")
+                            .font(.title2).foregroundStyle(WinnelStyle.accent).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Winnel").font(.title2.bold())
+                            Text("Saved stacks").font(.callout).foregroundStyle(.secondary)
+                        }
+                    }
                     Button { create = true } label: { Label("New stack", systemImage: "plus") }
                         .help("Create an empty named stack")
                 }.padding(16)
                 Divider()
                 List(model.state.stacks, selection: $stackID) { stack in
-                    VStack(alignment: .leading, spacing: 4) { Text(stack.name).lineLimit(2); Text("\(stack.memberships.count) items").font(.caption).foregroundStyle(.secondary) }.tag(stack.id).accessibilityElement(children: .combine)
-                }.listStyle(.sidebar).accessibilityLabel("Saved stacks")
-            }.frame(minWidth: 220, idealWidth: 250, maxWidth: 340)
+                    HStack(spacing: 10) {
+                        Image(systemName: "square.stack")
+                            .foregroundStyle(WinnelStyle.accent).frame(width: 30, height: 30)
+                            .background(WinnelStyle.surface, in: RoundedRectangle(cornerRadius: 8))
+                            .accessibilityHidden(true)
+                        Text(stack.name).lineLimit(2).foregroundStyle(Color(nsColor: .labelColor))
+                        Spacer(minLength: 4)
+                        Text("\(stack.memberships.count)").font(.caption.monospacedDigit())
+                            .foregroundStyle(Color(nsColor: .secondaryLabelColor))
+                            .accessibilityLabel("\(stack.memberships.count) \(stack.memberships.count == 1 ? "item" : "items")")
+                    }.padding(10)
+                        .background {
+                            RoundedRectangle(cornerRadius: 10).fill(WinnelStyle.surface)
+                                .overlay(RoundedRectangle(cornerRadius: 10).fill(stackID == stack.id ? WinnelStyle.accent.opacity(0.10) : Color.clear))
+                        }
+                        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(stackID == stack.id ? WinnelStyle.accent : WinnelStyle.border, lineWidth: stackID == stack.id ? 1.5 : 0.5))
+                        .tag(stack.id).accessibilityElement(children: .combine)
+                        .listRowSeparator(.hidden)
+                        .listRowBackground(Color.clear)
+                }.listStyle(.plain).scrollContentBackground(.hidden).accessibilityLabel("Saved stacks")
+                Text("\(model.state.stacks.count) saved \(model.state.stacks.count == 1 ? "stack" : "stacks")")
+                    .font(.caption).foregroundStyle(.secondary).padding(16)
+            }.background(WinnelStyle.canvas).frame(minWidth: 220, idealWidth: 250, maxWidth: 280)
             if let stack {
                 GeometryReader { geometry in
                     VStack(alignment: .leading, spacing: 0) {
-                        HStack(alignment: .center, spacing: 16) {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text(stack.name).font(.title2.bold()).lineLimit(2)
-                                Text("\(stack.memberships.count) ordered items").foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 14) {
+                            WinnelSectionHeader(title: stack.name, subtitle: "\(stack.memberships.count) ordered \(stack.memberships.count == 1 ? "item" : "items")", symbol: "square.stack")
+                            HStack(spacing: 10) {
+                                Button { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true } label: {
+                                    Label("Combine…", systemImage: "text.badge.plus")
+                                }.disabled(stack.memberships.isEmpty)
+                                Button { selectWholeStack(); export = true } label: {
+                                    Label("Export…", systemImage: "square.and.arrow.up")
+                                }.disabled(stack.memberships.isEmpty)
+                                Spacer()
+                                Menu("Stack actions") {
+                                    Button("Rename…") { rename = true }
+                                    Divider()
+                                    Button("Delete stack…", role: .destructive) { confirmDeleteStack = true }
+                                }.fixedSize()
                             }
-                            Spacer()
-                            Menu("Stack actions") { Button("Rename…") { rename = true }; Button("Export stack…") { selectWholeStack(); export = true }; Button("Combine stack…") { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true }; Divider(); Button("Delete stack…", role: .destructive) { confirmDeleteStack = true } }.fixedSize()
-                        }.padding(20)
+                        }.padding(20).background(WinnelStyle.surface)
                         Divider()
                         if stack.memberships.isEmpty { EmptyLibraryView(title: "Ready to collect", description: "Select clipboard items in the palette, then choose Add to stack. An item can belong to several stacks.", symbol: "square.stack") }
                         else {
@@ -49,12 +90,18 @@ struct LibraryView: View {
                                     ForEach(Array(stack.memberships.enumerated()), id: \.element.itemID) { index, membership in
                                         if let item = model.state.items.first(where: { $0.id == membership.itemID }) {
                                             VStack(alignment: .leading, spacing: 6) {
-                                                HStack { Text("\(index + 1)").font(.caption.monospacedDigit()).foregroundStyle(.secondary); ItemRow(item: item); Spacer() }
+                                                HStack(alignment: .top, spacing: 10) {
+                                                    Text("\(index + 1)").font(.caption.monospacedDigit())
+                                                        .foregroundStyle(.secondary).frame(width: 20).padding(.top, 8)
+                                                    ItemRow(item: item, isSelected: memberID == item.id)
+                                                }
                                                 HStack { Button { move(index: index, by: -1) } label: { Image(systemName: "arrow.up") }.disabled(index == 0).accessibilityLabel("Move \(item.textPreview) up"); Button { move(index: index, by: 1) } label: { Image(systemName: "arrow.down") }.disabled(index + 1 == stack.memberships.count).accessibilityLabel("Move \(item.textPreview) down"); if membership.associatedURL != nil { Label("Associated link", systemImage: "link").font(.caption).foregroundStyle(.secondary) } }.buttonStyle(.borderless)
                                             }.tag(item.id).padding(.vertical, 3)
+                                                .listRowSeparator(.hidden)
+                                                .listRowBackground(Color.clear)
                                         }
                                     }
-                                }.frame(minWidth: 280, idealWidth: 320, maxWidth: max(280, geometry.size.width - 261)).accessibilityLabel("Ordered stack items")
+                                }.listStyle(.plain).scrollContentBackground(.hidden).frame(minWidth: 280, idealWidth: 320, maxWidth: max(280, geometry.size.width - 261)).accessibilityLabel("Ordered stack items")
                                 memberDetail.frame(minWidth: 260, idealWidth: 350, maxWidth: max(260, geometry.size.width - 281))
                             }
                         }
@@ -62,6 +109,7 @@ struct LibraryView: View {
                 }
             } else { EmptyLibraryView(title: "Gather what belongs together", description: "Make a named stack of excerpts, links, images or file references. Items are shared, so removing one membership leaves other stacks intact.", symbol: "square.stack.3d.up") }
         }
+        .background(WinnelStyle.canvas)
         .frame(minWidth: 900, minHeight: 500).tint(WinnelStyle.accent)
         .onChange(of: memberID) { _, id in if let item = model.state.items.first(where: { $0.id == id }) { model.selectedIDs = [item.id]; model.selectionOrder = [item.id]; model.loadPreview(item.id) } }
         .onChange(of: model.selectedIDs) { _, ids in
@@ -80,13 +128,45 @@ struct LibraryView: View {
         if let item = selectedMember {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    PayloadPreviewView(item: item, payload: model.previewPayload, thumbnailData: model.previewThumbnailData, thumbnailFinished: model.previewThumbnailFinished); Divider(); ItemMetadataView(item: item)
-                    if let url = stack?.memberships.first(where: { $0.itemID == item.id })?.associatedURL { Text("Associated URL").font(.headline); Text(url).textSelection(.enabled).font(.callout) }
-                    HStack { Button("Copy") { model.copySelected() }; Button(item.isPinned ? "Unpin" : "Pin") { model.togglePin(item.id) } }
-                    Button("Associate a URL…") { associate = true }
-                    Text("This is an explicit citation for this stack membership. Winnel never discovers a page URL from nearby clips.").font(.callout).foregroundStyle(.secondary)
-                    Button("Remove from this stack") { if let id = stackID { model.removeFromStack(id, itemID: item.id) }; memberID = nil }
-                    Button("Delete everywhere…", role: .destructive) { confirmDeleteItem = true }
+                    HStack(spacing: 10) {
+                        ClipTypeBadge(kind: item.kind)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Saved item").font(.headline)
+                            Text(item.kind.label).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                    }
+                    WinnelCard {
+                        PayloadPreviewView(item: item, payload: model.previewPayload, thumbnailData: model.previewThumbnailData, thumbnailFinished: model.previewThumbnailFinished)
+                    }
+                    HStack {
+                        Button { model.copySelected() } label: { Label("Copy", systemImage: "doc.on.doc") }
+                            .buttonStyle(.borderedProminent)
+                        Button(item.isPinned ? "Unpin" : "Pin") { model.togglePin(item.id) }
+                        Spacer()
+                    }
+                    WinnelCard {
+                        Text("Details").font(.headline)
+                        ItemMetadataView(item: item)
+                    }
+                    WinnelCard {
+                        Text("Source link").font(.headline)
+                        if let url = stack?.memberships.first(where: { $0.itemID == item.id })?.associatedURL {
+                            Text(url).textSelection(.enabled).font(.callout)
+                        } else {
+                            Text("No associated URL").font(.callout).foregroundStyle(.secondary)
+                        }
+                        Button("Associate a URL…") { associate = true }
+                        Text("This is an explicit citation for this stack membership. Winnel never discovers a page URL from nearby clips.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Divider()
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Manage membership").font(.headline)
+                        Button("Remove from this stack") { if let id = stackID { model.removeFromStack(id, itemID: item.id) }; memberID = nil }
+                        Text("Other stack memberships and pins remain.").font(.caption).foregroundStyle(.secondary)
+                        Button("Delete everywhere…", role: .destructive) { confirmDeleteItem = true }
+                    }
                 }.padding(20)
             }
         } else { EmptyLibraryView(title: "Inspect a saved item", description: "Select an item to copy it, pin it or associate a URL.", symbol: "doc.text.magnifyingglass") }
@@ -104,8 +184,7 @@ struct AssociationSheet: View {
     private var valid: Bool { guard let parsed = URL(string: url), let scheme = parsed.scheme?.lowercased() else { return false }; return ["http", "https", "mailto"].contains(scheme) }
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Associate a URL").font(.title2.bold())
-            Text("Provide the source link yourself. This association belongs only to this stack membership.").foregroundStyle(.secondary)
+            WinnelSectionHeader(title: "Associate a URL", subtitle: "Provide the source link yourself. This association belongs only to this stack membership.", symbol: "link")
             TextField("https://example.com/source", text: $url).textFieldStyle(.roundedBorder).accessibilityLabel("Associated URL")
             if !url.isEmpty && !valid { Text("Enter an HTTP, HTTPS or mailto URL.").font(.callout).foregroundStyle(.red) }
             HStack { Button("Remove association") { save(nil) }; Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Button("Save link") { save(url) }.keyboardShortcut(.defaultAction).disabled(!valid) }

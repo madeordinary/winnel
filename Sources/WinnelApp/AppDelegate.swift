@@ -104,7 +104,7 @@ final class PalettePanel: NSPanel {
         guard NSApp.modalWindow == nil else { return }
         model.capturePaletteTarget()
         if panel == nil {
-            let storedSize = UserDefaults.standard.string(forKey: "paletteSize").map(NSSizeFromString) ?? NSSize(width: 620, height: 520)
+            let storedSize = UserDefaults.standard.string(forKey: "paletteSize").map(NSSizeFromString) ?? NSSize(width: 760, height: 600)
             let size = NSSize(width: max(620, min(storedSize.width, 1000)), height: max(420, min(storedSize.height, 900)))
             let window = PalettePanel(contentRect: NSRect(origin: .zero, size: size), styleMask: [.titled, .closable, .resizable, .nonactivatingPanel], backing: .buffered, defer: false)
             window.contentMinSize = NSSize(width: 620, height: 420)

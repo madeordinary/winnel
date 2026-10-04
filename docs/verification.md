@@ -48,6 +48,18 @@ Hosted probes instantiate AppModel and PaletteView, omit AppDelegate/global shor
 
 The final local idle fixture passed its thresholds. It does not establish reference M1 acceptance, true cold launch or actual shortcut-to-visible timing. Historical 1200-item offscreen core-search p95 was 3.094 ms and hosting-layout p95 0.002708 ms; failed attempt 1 measured encrypted search p95 6.155 ms and layout p95 0.004792 ms; baseline attempt 3 measured encrypted search p95 7.145 ms and layout p95 0.003042 ms. These component measurements do not establish real palette-opening latency.
 
+## UI revamp verification
+
+Recorded 2026-10-04 for the [Supaste-informed UI revamp](ui-revamp.md). This is a new source candidate; earlier native and resource observations above do not establish acceptance of it.
+
+- 125 XCTest tests passed with zero failures under test-process network denial, exit 0. The two additional AppModel tests exercise type filtering of authoritative payload search, preservation of matching selection, hidden-selection cleanup, cancellation of a pending hidden Copy and survival of an existing queue.
+- The optimized app and synthetic producer built with the existing toolchain and passed ad-hoc signature verification. This remains a local development build without Developer ID signing or notarization.
+- Diagnostics generated 29 actual SwiftUI raster renders from a 1200-item synthetic in-memory state. Inspected light/dark views include palette, selected Library, Settings categories, onboarding, recovery, export, queue, combination and selection order. Minimum viewports include palette/queue 620×420, Library 900×500 and export 500×380. A larger-text/high-contrast hosting variant is included. Stack selection contrast, empty-state overflow and fixed export footer were corrected after inspection.
+- These renders do not verify actual scroll input, native sheet placement, keyboard or VoiceOver. Combination shows an unavailable preview; selection order shows a single item with disabled arrows. No populated combination or multi-item reorder acceptance follows from those images.
+- During integration, the native synthetic producer's accessibility tree was readable. Winnel's UI connection closed before providing its window state, so native export/category/filter/keyboard flows were not verified. The producer exited through Command-Q. The exact disposable Winnel process was stopped and its identified temporary vault cleaned up; no normal-quit acceptance is claimed for this attempt. No personal clipboard or privacy settings were changed.
+
+The revamp application-source fingerprint is `f82bb7ae1a2d8a917c8f9f8a37fb10518177be1412ab83a2677dfb33f28a08ae` (SHA-256 of compact sorted-key JSON mapping every regular file in Sources, Tests and scripts plus Package.swift to its SHA-256). Executable SHA-256: `a7994d3f29a80d83bb0e93b1c10bec19e6142a983d0feffe039314756b96657d`. The extracted development ZIP passed signature and binary/license equality checks. The private receipt records the per-file hashes, archive hash, command exits and the native blocker. The public summary intentionally excludes machine-specific paths, process identifiers and raw observations. The full PRD goal remains incomplete.
+
 ## Remaining verification
 
 Use synthetic fixtures and record source revision, OS/toolchain/device, exact steps, expected versus actual output and failures. Avoid extrapolating historical observations to later binaries.

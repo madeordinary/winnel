@@ -12,23 +12,50 @@ struct PaletteView: View {
     @FocusState private var searchFocused: Bool
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
-                TextField("Search text, sources and stacks", text: $model.searchQuery).textFieldStyle(.plain).focused($searchFocused).accessibilityLabel("Search clipboard library")
-                if !model.searchQuery.isEmpty { Button { model.searchQuery = "" } label: { Image(systemName: "xmark.circle.fill") }.buttonStyle(.plain).accessibilityLabel("Clear search") }
-                Menu {
-                    Button("Saved stacks") { model.onShowLibrary?() }
-                    Button("Settings") { model.onShowSettings?() }
-                    Divider()
-                    if model.isPaused { Button("Resume capture") { model.resumeCapture() } }
-                    else { Button("Pause capture for 15 minutes") { model.pause(until: Date().addingTimeInterval(900)) }; Button("Pause until I resume") { model.pause(until: nil) } }
-                } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Library and settings")
+            VStack(alignment: .leading, spacing: 14) {
+                HStack {
+                    Label("Winnel", systemImage: "square.stack.3d.up.fill")
+                        .font(.headline).foregroundStyle(WinnelStyle.accent)
+                    Spacer()
+                    Label(captureLabel, systemImage: model.captureState == .active ? "circle.fill" : "pause.circle")
+                        .font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        .accessibilityLabel(captureLabel)
+                    Button { model.onShowLibrary?() } label: { Image(systemName: "square.stack") }
+                        .buttonStyle(.plain).help("Open saved stacks").accessibilityLabel("Saved stacks")
+                    Menu {
+                        Button("Saved stacks") { model.onShowLibrary?() }
+                        Button("Settings") { model.onShowSettings?() }
+                        Divider()
+                        if model.isPaused { Button("Resume capture") { model.resumeCapture() } }
+                        else { Button("Pause capture for 15 minutes") { model.pause(until: Date().addingTimeInterval(900)) }; Button("Pause until I resume") { model.pause(until: nil) } }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                        .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Library and settings")
+                }
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
+                    TextField("Find a copy, source or stack…", text: $model.searchQuery)
+                        .textFieldStyle(.plain).font(.title3).focused($searchFocused)
+                        .accessibilityLabel("Search clipboard library")
+                    if !model.searchQuery.isEmpty {
+                        Button { model.searchQuery = "" } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.plain).accessibilityLabel("Clear search")
+                    }
+                }.padding(12).background(WinnelStyle.surface, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(searchFocused ? WinnelStyle.accent : WinnelStyle.border, lineWidth: searchFocused ? 1 : 0.5))
+                HStack(spacing: 12) {
+                    Picker("Browse (search includes all items)", selection: $model.libraryScope) {
+                        Text("Recent").tag(LibraryScope.recent)
+                        Text("Pinned").tag(LibraryScope.pinned)
+                        Text("All items").tag(LibraryScope.all)
+                    }.pickerStyle(.segmented).labelsHidden()
+                        .accessibilityLabel("Browse recent, pinned, or all saved and recent items")
+                        .help("Search always includes all saved and recent items.")
+                    Picker("Content type", selection: $model.kindFilter) {
+                        Text("All types").tag(ClipKind?.none)
+                        ForEach(ClipKind.allCases, id: \.self) { Text($0.label).tag(Optional($0)) }
+                    }.labelsHidden().frame(width: 115).accessibilityLabel("Filter content type")
+                }
             }.padding(16)
-            Picker("Browse (search includes all items)", selection: $model.libraryScope) {
-                Text("Recent").tag(LibraryScope.recent)
-                Text("Pinned").tag(LibraryScope.pinned)
-                Text("All saved and recent").tag(LibraryScope.all)
-            }.pickerStyle(.segmented).labelsHidden().accessibilityLabel("Browse recent, pinned, or all saved and recent items").help("Search always includes all saved and recent items.").padding(.horizontal, 16).padding(.bottom, 12)
             Divider()
             if model.recoveryMessage != nil {
                 ScrollView { RecoveryView(model: model).frame(maxWidth: .infinity, alignment: .leading) }
@@ -39,12 +66,13 @@ struct PaletteView: View {
                     detail.frame(minWidth: 230, idealWidth: 290)
                 }
                 Divider()
-                actions.padding(12)
-                if model.queue != nil { Divider(); QueueStatusView(model: model).padding(12) }
+                actions.padding(.horizontal, 16).padding(.vertical, 12)
+                if model.queue != nil { Divider(); QueueStatusView(model: model).padding(12).background(WinnelStyle.accent.opacity(0.05)) }
             }
             if !model.status.isEmpty { Text(model.status).font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.bottom, 10).accessibilityLabel("Status: \(model.status)") }
         }
         .frame(minWidth: 620, minHeight: 420)
+        .background(WinnelStyle.canvas)
         .tint(WinnelStyle.accent)
         .onAppear { model.refreshClipboardAccessStatus(); searchFocused = model.recoveryMessage == nil }
         .onChange(of: model.recoveryMessage) { _, message in
@@ -73,31 +101,61 @@ struct PaletteView: View {
     }
     @ViewBuilder private var itemList: some View {
         if model.visibleItems.isEmpty {
-            EmptyLibraryView(title: model.searchQuery.isEmpty ? (model.libraryScope == .pinned ? "No pins yet" : "A little room for what you copy") : "No matches", description: model.searchQuery.isEmpty ? (model.libraryScope == .pinned ? "Pin an item to keep it beyond recent retention. Your pins appear here." : "Enable capture in Settings, then copy something. Saved stacks stay until you remove them.") : "Try a word, app name or stack name.", symbol: model.searchQuery.isEmpty ? "clipboard" : "magnifyingglass")
+            if let kind = model.kindFilter {
+                VStack {
+                    EmptyLibraryView(title: "No \(kind.label.lowercased()) items", description: "No items of this type match the current view. Choose another type or clear the filter.", symbol: kind.symbol)
+                    Button("Show all types") { model.kindFilter = nil }.padding(.bottom, 24)
+                }
+            } else {
+                EmptyLibraryView(title: model.searchQuery.isEmpty ? (model.libraryScope == .pinned ? "No pins yet" : "A little room for what you copy") : "No matches", description: model.searchQuery.isEmpty ? (model.libraryScope == .pinned ? "Pin an item to keep it beyond recent retention. Your pins appear here." : "Enable capture in Settings, then copy something. Saved stacks stay until you remove them.") : "Try a word, app name or stack name.", symbol: model.searchQuery.isEmpty ? "clipboard" : "magnifyingglass")
+            }
         } else {
             List(model.visibleItems, selection: $model.selectedIDs) { item in
-                ItemRow(item: item, query: model.searchQuery).tag(item.id).contextMenu {
+                ItemRow(item: item, query: model.searchQuery, isSelected: model.selectedIDs.contains(item.id)).tag(item.id).listRowSeparator(.hidden).contextMenu {
                     Button(item.isPinned ? "Unpin" : "Pin") { model.togglePin(item.id) }
                     Button("Delete everywhere…", role: .destructive) { deleteItem = item }
                 }
-            }.listStyle(.inset).accessibilityLabel("Clipboard items. Hold Command to select several.")
+            }.listStyle(.plain).scrollContentBackground(.hidden).padding(.horizontal, 6)
+                .accessibilityLabel("Clipboard items. Hold Command to select several.")
         }
     }
     @ViewBuilder private var detail: some View {
         if let item = model.selectedItems.first {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    HStack { Text(model.selectedItems.count > 1 ? "\(model.selectedItems.count) selected" : "Preview").font(.headline); Spacer(); Button { model.togglePin(item.id) } label: { Image(systemName: item.isPinned ? "pin.fill" : "pin") }.accessibilityLabel(item.isPinned ? "Unpin item" : "Pin item") }
-                    PayloadPreviewView(item: item, payload: model.previewPayload, thumbnailData: model.previewThumbnailData, thumbnailFinished: model.previewThumbnailFinished)
-                    Divider(); ItemMetadataView(item: item)
-                    if model.selectedItems.count > 1 { Text("The first selected item is shown. Review the order before combining or starting a queue.").font(.callout).foregroundStyle(.secondary) }
+                    HStack {
+                        Text(model.selectedItems.count > 1 ? "\(model.selectedItems.count) selected" : "Preview").font(.headline)
+                        Spacer()
+                        Button { model.togglePin(item.id) } label: { Image(systemName: item.isPinned ? "pin.fill" : "pin") }
+                            .buttonStyle(.borderless).accessibilityLabel(item.isPinned ? "Unpin item" : "Pin item")
+                    }
+                    WinnelCard {
+                        Label(item.kind.label, systemImage: item.kind.symbol).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                        PayloadPreviewView(item: item, payload: model.previewPayload, thumbnailData: model.previewThumbnailData, thumbnailFinished: model.previewThumbnailFinished)
+                    }
+                    Text("DETAILS").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    ItemMetadataView(item: item)
+                    if model.selectedItems.count > 1 { Text("Previewing the first selected item. Review the order before combining or starting a queue.").font(.callout).foregroundStyle(.secondary) }
                 }.padding(18)
             }
-        } else { EmptyLibraryView(title: "Choose a copy", description: "Select an item to inspect it. Command-click selects several for a stack, combination or queue.", symbol: "rectangle.and.hand.point.up.left") }
+        } else { EmptyLibraryView(title: "Choose a copy", description: "Inspect it here, then bring it back. Command-click to collect several items.", symbol: "rectangle.and.hand.point.up.left") }
+    }
+    private var captureLabel: String {
+        switch model.captureState {
+        case .active: "Capture active"
+        case .disabled: "Capture off"
+        case .paused: "Capture paused"
+        case .suspended: "Capture suspended"
+        }
     }
     private var actions: some View {
-        HStack {
-            Button(model.state.settings.defaultAction == .paste ? "Paste" : "Copy") { defaultAction() }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent).disabled(model.selectedItems.count != 1)
+        HStack(spacing: 10) {
+            Text(model.selectedItems.isEmpty ? "\(model.visibleItems.count) \(model.visibleItems.count == 1 ? "item" : "items")" : "\(model.selectedItems.count) selected")
+                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+            Button { createStack = true } label: { Label("Save stack", systemImage: "square.stack.badge.plus") }
+                .disabled(model.selectedItems.isEmpty).help("Save selected items as an ordered stack")
+            Button("Combine…") { model.prepareCombination(format: .newline); combine = true }
+                .disabled(model.selectedItems.isEmpty)
             Menu("More") {
                 Button("Copy") { model.copySelected() }.disabled(model.selectedItems.count != 1)
                 Button("Paste") { model.pasteSelected() }.disabled(model.selectedItems.count != 1)
@@ -112,9 +170,16 @@ struct PaletteView: View {
                 Button("Start Paste Next queue") { model.startQueue(mode: .paste) }
                 if let first = model.selectedItems.first { Button("Delete everywhere…", role: .destructive) { deleteItem = first } }
             }.fixedSize().disabled(model.selectedItems.isEmpty)
-            Spacer()
-            Text("\(model.visibleItems.count) items").font(.callout).foregroundStyle(.secondary)
-        }
+            Spacer(minLength: 4)
+            Button { defaultAction() } label: {
+                HStack(spacing: 8) {
+                    Text(model.state.settings.defaultAction == .paste ? "Paste" : "Copy")
+                    Text("↩").accessibilityHidden(true)
+                }
+            }.keyboardShortcut(.defaultAction).buttonStyle(.borderedProminent)
+                .disabled(model.selectedItems.count != 1)
+                .accessibilityLabel(model.state.settings.defaultAction == .paste ? "Paste" : "Copy")
+        }.controlSize(.regular)
     }
     private func defaultAction() { if model.state.settings.defaultAction == .paste { model.pasteSelected() } else { model.copySelected() } }
 }
@@ -134,13 +199,13 @@ struct PayloadPreviewView: View {
                 }
             } else if item.kind == .files {
                 ForEach(Array(payload.fileReferences.enumerated()), id: \.offset) { _, file in
-                    VStack(alignment: .leading, spacing: 4) { Label(file.displayName, systemImage: "doc"); Text(file.urlString).font(.callout).textSelection(.enabled); Text(file.availability.rawValue.capitalized).font(.caption).foregroundStyle(.secondary) }
+                    VStack(alignment: .leading, spacing: 4) { Label(file.displayName, systemImage: "doc"); Text(file.urlString).font(.callout).textSelection(.enabled).fixedSize(horizontal: false, vertical: true); Text(file.availability.rawValue.capitalized).font(.caption).foregroundStyle(.secondary) }
                 }
                 Text("File references only. Winnel does not copy the file contents.").font(.callout).foregroundStyle(.secondary)
             } else {
                 let excerpt = payload.boundedPlainText()
                 if let text = excerpt?.text, excerpt?.isTruncated == false, let swatch = literalColor(text) {
-                    HStack { RoundedRectangle(cornerRadius: 8).fill(swatch).frame(width: 48, height: 48).overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.5))).accessibilityLabel("Color swatch for " + text); Text("Recognized hex color").font(.callout).foregroundStyle(.secondary) }
+                    HStack { RoundedRectangle(cornerRadius: 12).fill(swatch).frame(width: 64, height: 64).overlay(RoundedRectangle(cornerRadius: 8).stroke(.secondary.opacity(0.5))).accessibilityLabel("Color swatch for " + text); Text("Recognized hex color").font(.callout).foregroundStyle(.secondary) }
                 }
                 Text(WinnelStyle.displayText(excerpt?.text ?? item.textPreview)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
                 if excerpt?.isTruncated == true { Text("Showing a bounded text excerpt. Copy and Export still use the complete captured content.").font(.callout).foregroundStyle(.secondary) }
@@ -177,8 +242,7 @@ struct SelectionOrderSheet: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Selection order").font(.title2.bold())
-            Text("Combinations and queues use this order.").foregroundStyle(.secondary)
+            WinnelSectionHeader(title: "Selection order", subtitle: "Combinations and queues use this order.", symbol: "list.number")
             List { ForEach(Array(model.selectedItems.enumerated()), id: \.element.id) { index, item in
                 HStack { Text("\(index + 1)."); Text(item.textPreview).lineLimit(2); Spacer(); Button { move(index, -1) } label: { Image(systemName: "arrow.up") }.disabled(index == 0).accessibilityLabel("Move item up"); Button { move(index, 1) } label: { Image(systemName: "arrow.down") }.disabled(index + 1 == model.selectedItems.count).accessibilityLabel("Move item down") }
             } }
@@ -194,7 +258,7 @@ struct CombinationSheet: View {
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Combine \(model.selectedItems.count) items").font(.title2.bold())
+            WinnelSectionHeader(title: "Combine \(model.selectedItems.count) \(model.selectedItems.count == 1 ? "item" : "items")", subtitle: "One preview. Exactly what you will copy.", symbol: "text.badge.plus")
             Picker("Format", selection: Binding(get: { model.combinationFormat }, set: { model.prepareCombination(format: $0, stackID: stackID) })) { ForEach(CombinationFormat.allCases, id: \.self) { Text($0.label).tag($0) } }
             Text("Copy, Paste and Export use this exact preview. Original items stay unchanged.").font(.callout).foregroundStyle(.secondary)
             ScrollView { Text(model.combinationPreview.isEmpty ? "No compatible preview. Select text or links; Markdown links need a copied URL or an explicit stack association." : model.combinationPreview).font(.system(.body, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(12) }.background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))

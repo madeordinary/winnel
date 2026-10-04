@@ -19,6 +19,20 @@ import WinnelCore
         let item = model.state.recentItems.first(where: { $0.kind == .text })!
         model.selectedIDs = [item.id]; model.selectionOrder = [item.id]
         model.previewPayload = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data("A deliberately synthetic clipboard example.\nNo private data is used.".utf8))])
+        let libraryModel = AppModel(fixtureMode: true)
+        libraryModel.state = model.state
+        let stack = libraryModel.state.stacks[0]
+        let member = libraryModel.state.items.first { $0.id == stack.memberships[3].itemID }!
+        libraryModel.selectedIDs = [member.id]; libraryModel.selectionOrder = [member.id]
+        libraryModel.previewPayload = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data(member.textPreview.utf8))])
+        let queueModel = AppModel(fixtureMode: true)
+        queueModel.state = model.state
+        queueModel.selectedIDs = [item.id]; queueModel.selectionOrder = [item.id]
+        queueModel.previewPayload = model.previewPayload
+        queueModel.queue = .init(entries: [.init(item: item, payload: model.previewPayload!)], now: Date())
+        let filteredModel = AppModel(fixtureMode: true)
+        filteredModel.state = model.state
+        filteredModel.kindFilter = .richText
         var captures: [String] = []
         let previousAppearance = NSApp.appearance
         defer { NSApp.appearance = previousAppearance }
@@ -26,7 +40,11 @@ import WinnelCore
             NSApp.appearance = NSAppearance(named: appearance)
             let views: [(String, NSSize, AnyView)] = [
                 ("palette", .init(width: 760, height: 660), AnyView(PaletteView(model: model))),
-                ("library", .init(width: 1000, height: 720), AnyView(LibraryView(model: model))),
+                ("library", .init(width: 1000, height: 720), AnyView(LibraryView(model: libraryModel, initialStackID: stack.id, initialMemberID: member.id))),
+                ("library-empty", .init(width: 900, height: 500), AnyView(LibraryView(model: model))),
+                ("export", .init(width: 540, height: 760), AnyView(ExportOptionsSheet(model: model))),
+                ("combination", .init(width: 560, height: 480), AnyView(CombinationSheet(model: model))),
+                ("queue", .init(width: 760, height: 660), AnyView(PaletteView(model: queueModel))),
                 ("settings", .init(width: 780, height: 1100), AnyView(SettingsView(model: model))),
                 ("onboarding", .init(width: 760, height: 720), AnyView(OnboardingView(model: model))),
                 ("recovery", .init(width: 720, height: 600), AnyView(RecoveryView(model: model)))
@@ -42,7 +60,15 @@ import WinnelCore
             .environment(\.dynamicTypeSize, .accessibility1))
         let variants: [(String, NSSize, AnyView)] = [
             ("palette-light-accessibility", .init(width: 620, height: 420), accessibilityPalette),
-            ("settings-light-full", .init(width: 780, height: 2000), AnyView(SettingsView(model: model))),
+            ("library-light-minimum", .init(width: 900, height: 500), AnyView(LibraryView(model: libraryModel, initialStackID: stack.id, initialMemberID: member.id))),
+            ("queue-light-minimum", .init(width: 620, height: 420), AnyView(PaletteView(model: queueModel))),
+            ("palette-filter-empty", .init(width: 620, height: 420), AnyView(PaletteView(model: filteredModel))),
+            ("export-light-minimum", .init(width: 500, height: 380), AnyView(ExportOptionsSheet(model: model))),
+            ("settings-storage", .init(width: 680, height: 600), AnyView(SettingsView(model: model, initialSection: .storage))),
+            ("settings-shortcuts", .init(width: 680, height: 600), AnyView(SettingsView(model: model, initialSection: .shortcuts))),
+            ("settings-privacy", .init(width: 680, height: 600), AnyView(SettingsView(model: model, initialSection: .privacy))),
+            ("settings-general", .init(width: 680, height: 600), AnyView(SettingsView(model: model, initialSection: .general))),
+            ("selection-order", .init(width: 500, height: 400), AnyView(SelectionOrderSheet(model: model))),
             ("onboarding-light-full", .init(width: 760, height: 1400), AnyView(OnboardingView(model: model)))
         ]
         for (name, size, view) in variants {
