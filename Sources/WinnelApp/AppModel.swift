@@ -327,7 +327,8 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     private func resumeIfPermitted() {
         monitor.exclusions = state.settings.excludedBundleIdentifiers
         guard !lifecycleSuspended else { monitor.suspend(); return }
-        guard state.settings.captureEnabled, recoveryMessage == nil, !explicitPause, !shuttingDown else { monitor.stop(); return }
+        guard state.settings.captureEnabled, recoveryMessage == nil, !shuttingDown else { monitor.stop(); return }
+        guard !explicitPause else { monitor.pause(); return }
         if state.settings.capturePaused == true && state.settings.pauseUntil == nil { monitor.pause(); status = "Capture paused until you resume." }
         else if let deadline = state.settings.pauseUntil, deadline > Date() { monitor.pause() }
         else { monitor.resume(); refreshClipboardAccessStatus(); if captureState == .active { status = "Capture active." } }
@@ -407,10 +408,16 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             let snapshot = try await repository.mutate {
                 $0.settings.onboardingComplete = true; $0.settings.captureEnabled = capture
                 $0.settings.directPasteEnabled = directPaste; $0.settings.launchAtLogin = login
-                $0.settings.updateChecksEnabled = updates; $0.settings.pauseUntil = nil; $0.settings.capturePaused = false
+                $0.settings.updateChecksEnabled = updates
+                if !capture { $0.settings.pauseUntil = nil; $0.settings.capturePaused = false }
             }
             apply(snapshot); guard recoveryMessage == nil else { return }
-            explicitPause = false; onSettingsChanged?(state.settings); if generation == captureControlGeneration { resumeIfPermitted() }; onDismissOnboarding?()
+            onSettingsChanged?(state.settings)
+            if generation == captureControlGeneration {
+                explicitPause = state.settings.capturePaused == true && state.settings.pauseUntil == nil
+                resumeIfPermitted()
+            }
+            onDismissOnboarding?()
             if updates { checkForUpdates(automatic: true) }
         } catch { fail(error) } }
     }

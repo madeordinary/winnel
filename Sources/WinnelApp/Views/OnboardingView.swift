@@ -22,18 +22,22 @@ struct OnboardingView: View {
                 Text("Winnel keeps a private library on this Mac. Recent copies expire after 24 hours or 200 unsaved items. Pins and saved stacks stay until you remove them. Captured content, previews and search data are encrypted at rest.")
                 GroupBox("1. Choose capture") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Toggle("Enable clipboard capture", isOn: $capture)
+                        Toggle("Enable clipboard capture", isOn: Binding(get: { capture }, set: { enabled in
+                            capture = enabled
+                            if enabled { model.enableCapture() } else { model.disableCapture() }
+                        }))
                         ClipboardAccessView(model: model)
                         Text("Capture starts only when you choose it. Pause any time. Exclusions help skip selected apps, but cannot guarantee every secret is detected. macOS may separately ask for clipboard access.").font(.callout).foregroundStyle(.secondary)
                     }.padding(6)
                 }
                 GroupBox("2. Try three examples") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("Open the palette with your configured shortcut, find a copy, then press Return to Copy. You can select several items to create a saved stack.")
+                        LabeledContent("Open palette", value: ShortcutSpec(keyCode: model.settings.paletteShortcutKeyCode, modifiers: model.settings.paletteShortcutModifiers).displayName)
+                        Text("Use this shortcut to find a copy, then press Return to Copy. You can select several items to create a saved stack.")
                         if model.fixtureMode {
                             Button(practiced ? "Examples added" : "Add synthetic practice examples") { model.addPracticeExamples(); practiced = true }.disabled(practiced)
                         } else {
-                            Text("After enabling capture, select and copy each practice line with Command-C:").font(.callout)
+                            Text(model.captureState == .active ? "Capture is ready. Select and copy each practice line with Command-C:" : "Enable capture above and allow clipboard access before copying these lines with Command-C:").font(.callout)
                             Text("First practice copy\nhttps://example.com\nThird practice copy").textSelection(.enabled).font(.system(.body, design: .monospaced))
                         }
                         Text("Practice uses these examples. Your existing clipboard is not imported.").font(.callout).foregroundStyle(.secondary)
@@ -62,7 +66,7 @@ struct OnboardingView: View {
             Button("Get started") { finish() }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
         }.padding(.horizontal, 32).padding(.vertical, 20).background(WinnelStyle.surface)
         }.background(WinnelStyle.canvas).frame(minWidth: 600, minHeight: 600).tint(WinnelStyle.accent)
-        .onAppear { model.refreshClipboardAccessStatus() }
+        .onAppear { capture = model.settings.captureEnabled; model.refreshClipboardAccessStatus() }
     }
     private func benefit(_ title: String, symbol: String) -> some View {
         VStack(alignment: .leading, spacing: 8) {

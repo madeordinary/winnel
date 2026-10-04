@@ -33,6 +33,10 @@ import WinnelCore
         let filteredModel = AppModel(fixtureMode: true)
         filteredModel.state = model.state
         filteredModel.kindFilter = .richText
+        let unsupportedModel = AppModel(fixtureMode: true)
+        unsupportedModel.state = model.state
+        let imageItem = unsupportedModel.state.items.first { $0.kind == .image }!
+        unsupportedModel.selectedIDs = [imageItem.id]; unsupportedModel.selectionOrder = [imageItem.id]
         var captures: [String] = []
         let previousAppearance = NSApp.appearance
         defer { NSApp.appearance = previousAppearance }
@@ -63,13 +67,15 @@ import WinnelCore
             ("library-light-minimum", .init(width: 900, height: 500), AnyView(LibraryView(model: libraryModel, initialStackID: stack.id, initialMemberID: member.id))),
             ("queue-light-minimum", .init(width: 620, height: 420), AnyView(PaletteView(model: queueModel))),
             ("palette-filter-empty", .init(width: 620, height: 420), AnyView(PaletteView(model: filteredModel))),
+            ("palette-combine-unavailable", .init(width: 620, height: 420), AnyView(PaletteView(model: unsupportedModel))),
             ("export-light-minimum", .init(width: 500, height: 380), AnyView(ExportOptionsSheet(model: model))),
             ("settings-storage", .init(width: 680, height: 600), AnyView(SettingsView(model: model, initialSection: .storage))),
             ("settings-shortcuts", .init(width: 680, height: 600), AnyView(SettingsView(model: model, initialSection: .shortcuts))),
             ("settings-privacy", .init(width: 680, height: 600), AnyView(SettingsView(model: model, initialSection: .privacy))),
             ("settings-general", .init(width: 680, height: 600), AnyView(SettingsView(model: model, initialSection: .general))),
             ("selection-order", .init(width: 500, height: 400), AnyView(SelectionOrderSheet(model: model))),
-            ("onboarding-light-full", .init(width: 760, height: 1400), AnyView(OnboardingView(model: model)))
+            ("onboarding-light-full", .init(width: 760, height: 1400), AnyView(OnboardingView(model: model))),
+            ("onboarding-light-minimum", .init(width: 600, height: 600), AnyView(OnboardingView(model: model)))
         ]
         for (name, size, view) in variants {
             let filename = name + ".png"

@@ -60,6 +60,18 @@ Recorded 2026-10-04 for the [Supaste-informed UI revamp](ui-revamp.md). This is 
 
 The revamp application-source fingerprint is `f82bb7ae1a2d8a917c8f9f8a37fb10518177be1412ab83a2677dfb33f28a08ae` (SHA-256 of compact sorted-key JSON mapping every regular file in Sources, Tests and scripts plus Package.swift to its SHA-256). Executable SHA-256: `a7994d3f29a80d83bb0e93b1c10bec19e6142a983d0feffe039314756b96657d`. The extracted development ZIP passed signature and binary/license equality checks. The private receipt records the per-file hashes, archive hash, command exits and the native blocker. The public summary intentionally excludes machine-specific paths, process identifiers and raw observations. The full PRD goal remains incomplete.
 
+## PRD follow-up
+
+Recorded 2026-10-04 after the initial UI revamp. Onboarding now displays the configured palette shortcut and starts practice capture from the explicit capture toggle, subject to OS consent. Completing onboarding preserves an indefinite or timed pause chosen during practice. Palette and saved-stack Combine controls disable unsupported image/file selections and display an explanation; backend payload validation remains in place.
+
+- **131 XCTest tests passed, zero failures, exit 0**, with test-process network denied. New named-board regressions cover capture before onboarding completion, exclusion of earlier clipboard contents, separate default-off conveniences, final capture-off winning a pending enable, and preserved pauses until explicit Resume. Shortcut formatting, Combine eligibility and ordered mixed JSON export have new coverage.
+- The pause regression first failed against the old completion behavior. The first fix retained the pause but exposed a shared guard that labeled indefinite pause as disabled. Both failures were retained; the final suite passed after the guard was corrected.
+- Mixed JSON tests decode exact ordered text/link/image/file records, timestamps, provenance, citations and unavailable/relative references. Both image-included and image-omitted exports match preview bytes on disk; included captured asset bytes and references match exactly. Synthetic image bytes are opaque test data, so this test does not establish image decoding or native export interaction.
+- The optimized ad-hoc package built successfully. Extracted signature verification and executable/license equality checks passed. Diagnostics generated **31 actual SwiftUI renders**, adding minimum onboarding and unsupported-Combine views. Inspected minimum palette/Library layouts retain visible explanations and actions; onboarding keeps its footer while the body scrolls. This does not establish physical scrolling, keyboard or VoiceOver behavior.
+- A fresh native inspection attempt on the preceding `5373a3d` candidate failed before Winnel window state, while the synthetic producer remained readable. Owned fixture processes and temporary storage were cleaned up. No new native acceptance is claimed for this follow-up.
+
+Application-source fingerprint: `cb5f3bc0a7cf0c6850a6483a8b95a07dfdc1b7d8375215bb163a5f0dd6c25041`, using the same per-file method above. Executable SHA-256: `904b3ee7d6ec500cd36a37c8cac79d1a2d0ffabdb296729ccfa8926ee8445492`. Development ZIP SHA-256: `883264456dc0a85fa81432895e657a76902ac6ab01385aa079a807870ec80cd9`. Private receipts retain command exits, source hashes and earlier failed regression logs. The full PRD goal remains incomplete; the production direct-paste allowlist remains empty.
+
 ## Remaining verification
 
 Use synthetic fixtures and record source revision, OS/toolchain/device, exact steps, expected versus actual output and failures. Avoid extrapolating historical observations to later binaries.

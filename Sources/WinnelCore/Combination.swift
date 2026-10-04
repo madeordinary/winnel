@@ -9,6 +9,10 @@ public struct CombinationEntry: Sendable {
     public init(item: ClipboardItem, payload: ClipPayload, associatedURL: String? = nil) { self.item = item; self.payload = payload; self.associatedURL = associatedURL }
 }
 public enum Combination {
+    /// Metadata eligibility for presenting Combine. Payload and format validation still happen in preview.
+    public static func canCombine(_ items: [ClipboardItem]) -> Bool {
+        !items.isEmpty && items.allSatisfy { [.text, .richText, .url].contains($0.kind) }
+    }
     public static func preview(_ entries: [CombinationEntry], format: CombinationFormat) throws -> String {
         try Task.checkCancellation()
         guard !entries.isEmpty else { throw CombinationError.emptySelection }

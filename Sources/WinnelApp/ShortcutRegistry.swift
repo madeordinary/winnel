@@ -6,6 +6,12 @@ struct ShortcutSpec: Codable, Equatable {
     var modifiers: UInt32
     static let palette = ShortcutSpec(keyCode: 49, modifiers: UInt32(cmdKey | shiftKey))
     static let next = ShortcutSpec(keyCode: 45, modifiers: UInt32(cmdKey | shiftKey))
+    var displayName: String {
+        let labels: [(Int, String)] = [(controlKey, "Control"), (optionKey, "Option"), (shiftKey, "Shift"), (cmdKey, "Command")]
+        let keys = labels.filter { modifiers & UInt32($0.0) != 0 }.map(\.1)
+        let key = keyCode == 49 ? "Space" : keyCode == 45 ? "N" : "Key \(keyCode)"
+        return (keys + [key]).joined(separator: "–")
+    }
 }
 @MainActor final class ShortcutRegistry {
     private var registrations: [EventHotKeyRef] = []

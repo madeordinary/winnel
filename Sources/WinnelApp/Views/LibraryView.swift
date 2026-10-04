@@ -18,6 +18,11 @@ struct LibraryView: View {
         _memberID = State(initialValue: initialMemberID)
     }
     private var stack: SavedStack? { model.state.stacks.first { $0.id == stackID } }
+    private var stackCanCombine: Bool {
+        guard let stack else { return false }
+        let items = stack.memberships.compactMap { membership in model.state.items.first { $0.id == membership.itemID } }
+        return items.count == stack.memberships.count && Combination.canCombine(items)
+    }
     private var selectedMember: ClipboardItem? {
         guard let memberID, model.selectedIDs == [memberID] else { return nil }
         return model.state.items.first { $0.id == memberID }
@@ -70,7 +75,7 @@ struct LibraryView: View {
                             HStack(spacing: 10) {
                                 Button { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true } label: {
                                     Label("Combine…", systemImage: "text.badge.plus")
-                                }.disabled(stack.memberships.isEmpty)
+                                }.disabled(!stackCanCombine)
                                 Button { selectWholeStack(); export = true } label: {
                                     Label("Export…", systemImage: "square.and.arrow.up")
                                 }.disabled(stack.memberships.isEmpty)
@@ -80,6 +85,10 @@ struct LibraryView: View {
                                     Divider()
                                     Button("Delete stack…", role: .destructive) { confirmDeleteStack = true }
                                 }.fixedSize()
+                            }
+                            if !stack.memberships.isEmpty && !stackCanCombine {
+                                Text("Combine supports text and links. This stack includes an unsupported item; you can still export the stack.")
+                                    .font(.caption).foregroundStyle(.secondary)
                             }
                         }.padding(20).background(WinnelStyle.surface)
                         Divider()

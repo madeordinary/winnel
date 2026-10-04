@@ -66,7 +66,13 @@ struct PaletteView: View {
                     detail.frame(minWidth: 230, idealWidth: 290)
                 }
                 Divider()
-                actions.padding(.horizontal, 16).padding(.vertical, 12)
+                VStack(alignment: .leading, spacing: 8) {
+                    actions
+                    if !model.selectedItems.isEmpty && !Combination.canCombine(model.selectedItems) {
+                        Text("Combine supports text and links. Images and file references can be saved or exported.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }.padding(.horizontal, 16).padding(.vertical, 12)
                 if model.queue != nil { Divider(); QueueStatusView(model: model).padding(12).background(WinnelStyle.accent.opacity(0.05)) }
             }
             if !model.status.isEmpty { Text(model.status).font(.callout).foregroundStyle(.secondary).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 16).padding(.bottom, 10).accessibilityLabel("Status: \(model.status)") }
@@ -155,7 +161,7 @@ struct PaletteView: View {
             Button { createStack = true } label: { Label("Save stack", systemImage: "square.stack.badge.plus") }
                 .disabled(model.selectedItems.isEmpty).help("Save selected items as an ordered stack")
             Button("Combine…") { model.prepareCombination(format: .newline); combine = true }
-                .disabled(model.selectedItems.isEmpty)
+                .disabled(!Combination.canCombine(model.selectedItems))
             Menu("More") {
                 Button("Copy") { model.copySelected() }.disabled(model.selectedItems.count != 1)
                 Button("Paste") { model.pasteSelected() }.disabled(model.selectedItems.count != 1)
@@ -163,6 +169,7 @@ struct PaletteView: View {
                 Button("Create stack…") { createStack = true }
                 Menu("Add to stack") { ForEach(model.state.stacks) { stack in Button(stack.name) { model.addToStack(stack.id) } } }.disabled(model.state.stacks.isEmpty)
                 Button("Combine…") { model.prepareCombination(format: .newline); combine = true }
+                    .disabled(!Combination.canCombine(model.selectedItems))
                 Button("Review selection order…") { orderSelection = true }
                 Button("Export selected…") { export = true }
                 Divider()

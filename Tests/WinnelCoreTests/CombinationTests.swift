@@ -4,6 +4,18 @@ final class CombinationTests: XCTestCase {
     private func entry(_ text: String, kind: ClipKind = .text, url: String? = nil) -> CombinationEntry {
         .init(item: .init(copiedAt: Date(), kind: kind, textPreview: text, payloadByteCount: text.utf8.count, fingerprint: text), payload: .init(representations: [.init(type: "public.utf8-plain-text", data: Data(text.utf8))]), associatedURL: url)
     }
+    func testCombinationEligibilityRequiresNonemptyTextOrLinkSelection() {
+        XCTAssertFalse(Combination.canCombine([]))
+        for kind in [ClipKind.text, .richText, .url] {
+            XCTAssertTrue(Combination.canCombine([entry("example", kind: kind).item]))
+        }
+        XCTAssertTrue(Combination.canCombine([entry("text").item, entry("rich", kind: .richText).item, entry("link", kind: .url).item]))
+        for kind in [ClipKind.image, .files] {
+            let unsupported = entry("unsupported", kind: kind).item
+            XCTAssertFalse(Combination.canCombine([unsupported]))
+            XCTAssertFalse(Combination.canCombine([entry("text").item, unsupported]))
+        }
+    }
     func testExactOrderedPreviewAndJSONEscaping() throws {
         let entries = [entry("a\"b"), entry("line\nnext")]
         XCTAssertEqual(try Combination.preview(entries, format: .newline), "a\"b\nline\nnext")

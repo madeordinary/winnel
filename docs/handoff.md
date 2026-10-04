@@ -4,6 +4,8 @@ Maintainer-recorded verification for application source `590589742b217d0f0a0d39c
 
 The 2026-10-04 [UI revamp](ui-revamp.md) adds content-type filtering and updates the main native surfaces. Its 125-test offline suite and optimized build passed; 29 synthetic component renders cover light/dark and selected minimum sizes. Native interaction remains unverified on this candidate because the UI connection could not inspect Winnel. Start with JSON export and keyboard/category/filter navigation when native access is available. See the [new verification record](verification.md#ui-revamp-verification); retain the earlier observations under their original revisions.
 
+The [PRD follow-up](verification.md#prd-follow-up) fixes live onboarding practice, shortcut display, pause preservation and unavailable Combine actions. Its 131-test offline suite, optimized ad-hoc package/extraction and 31 component renders passed. Start native acceptance with onboarding opt-in → practice → Pause → Get started → still paused, then JSON export and keyboard/category/filter navigation.
+
 ## Run and reproduce
 
 From the repository root:

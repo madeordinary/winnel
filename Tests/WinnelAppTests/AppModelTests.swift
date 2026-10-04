@@ -1,6 +1,7 @@
 import XCTest
 import AppKit
 import ImageIO
+import Carbon
 @testable import WinnelApp
 import WinnelCore
 import WinnelPlatform
@@ -48,6 +49,75 @@ final class AppModelTests: XCTestCase, @unchecked Sendable {
         XCTAssertFalse(model.state.settings.updateChecksEnabled)
         XCTAssertEqual(model.captureState, .disabled)
         await model.shutdown()
+    }
+    @MainActor func testOnboardingOptInCapturesOnlyNewPracticeCopiesBeforeCompletion() async throws {
+        let board = NSPasteboard(name: .init("org.madeordinary.winnel.onboarding-test." + UUID().uuidString))
+        defer { board.releaseGlobally() }
+        board.clearContents(); board.setString("synthetic pre-opt-in copy", forType: .string)
+        let model = AppModel(fixtureMode: true, pasteboard: board)
+        await model.start()
+        model.enableCapture()
+        try await settle { model.captureState == .active }
+        XCTAssertFalse(model.settings.onboardingComplete)
+        XCTAssertFalse(model.settings.directPasteEnabled)
+        XCTAssertFalse(model.settings.launchAtLogin)
+        XCTAssertFalse(model.settings.updateChecksEnabled)
+        model.monitor.poll(); model.monitor.poll()
+        XCTAssertTrue(model.state.items.isEmpty)
+        board.clearContents(); board.setString("synthetic new practice copy", forType: .string)
+        model.monitor.poll(); model.monitor.poll()
+        try await settle { model.state.items.count == 1 }
+        XCTAssertEqual(model.state.items.first?.textPreview, "synthetic new practice copy")
+        XCTAssertFalse(model.settings.onboardingComplete)
+        model.finishOnboarding(capture: false, directPaste: false, launchAtLogin: false, updates: false)
+        try await settle { model.settings.onboardingComplete }
+        XCTAssertFalse(model.settings.captureEnabled)
+        XCTAssertEqual(model.captureState, .disabled)
+        await model.shutdown()
+    }
+    @MainActor func testFinishingOnboardingRevokesPendingPracticeCaptureEnable() async throws {
+        let model = AppModel(fixtureMode: true)
+        await model.start()
+        model.enableCapture()
+        model.finishOnboarding(capture: false, directPaste: false, launchAtLogin: false, updates: false)
+        try await settle { model.settings.onboardingComplete }
+        XCTAssertFalse(model.settings.captureEnabled)
+        XCTAssertEqual(model.captureState, .disabled)
+        await model.shutdown()
+    }
+    @MainActor func testFinishingOnboardingPreservesPracticePauseUntilExplicitResume() async throws {
+        for deadline: Date? in [nil, Date().addingTimeInterval(300)] {
+            let board = NSPasteboard(name: .init("org.madeordinary.winnel.onboarding-pause-test." + UUID().uuidString))
+            defer { board.releaseGlobally() }
+            let model = AppModel(fixtureMode: true, pasteboard: board)
+            await model.start(); model.enableCapture()
+            try await settle { model.captureState == .active }
+            model.pause(until: deadline)
+            model.finishOnboarding(capture: true, directPaste: false, launchAtLogin: false, updates: false)
+            try await settle { model.settings.onboardingComplete }
+            XCTAssertTrue(model.settings.captureEnabled)
+            XCTAssertEqual(model.settings.capturePaused, true)
+            XCTAssertEqual(model.settings.pauseUntil, deadline)
+            XCTAssertEqual(model.captureState, .paused)
+            board.clearContents(); board.setString("synthetic paused practice copy", forType: .string)
+            model.monitor.poll(); model.monitor.poll()
+            XCTAssertTrue(model.state.items.isEmpty)
+            model.resumeCapture()
+            try await settle { model.captureState == .active }
+            model.monitor.poll(); model.monitor.poll()
+            XCTAssertTrue(model.state.items.isEmpty)
+            board.clearContents(); board.setString("synthetic resumed practice copy", forType: .string)
+            model.monitor.poll(); model.monitor.poll()
+            try await settle { model.state.items.count == 1 }
+            XCTAssertEqual(model.state.items.first?.textPreview, "synthetic resumed practice copy")
+            await model.shutdown()
+        }
+    }
+    func testShortcutDisplayUsesConfiguredModifiersAndKey() {
+        XCTAssertEqual(ShortcutSpec.palette.displayName, "Shift–Command–Space")
+        XCTAssertEqual(ShortcutSpec(keyCode: 49, modifiers: UInt32(controlKey | optionKey)).displayName, "Control–Option–Space")
+        XCTAssertEqual(ShortcutSpec(keyCode: 45, modifiers: UInt32(cmdKey | optionKey)).displayName, "Option–Command–N")
+        XCTAssertEqual(ShortcutSpec(keyCode: 99, modifiers: UInt32(cmdKey)).displayName, "Command–Key 99")
     }
 }
 
