@@ -16,6 +16,8 @@ struct ShortcutSpec: Codable, Equatable {
 @MainActor final class ShortcutRegistry {
     private var registrations: [EventHotKeyRef] = []
     private var activePair: (ShortcutSpec, ShortcutSpec)?
+    /// The Next shortcut macOS actually accepted, which can differ from the saved choice.
+    var activeNext: ShortcutSpec? { activePair?.1 }
     private var handler: EventHandlerRef?
     var onPalette: () -> Void = {}
     var onNext: () -> Void = {}

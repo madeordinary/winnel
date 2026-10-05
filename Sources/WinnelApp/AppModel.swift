@@ -72,6 +72,10 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     private var shuttingDown = false
     private var explicitPause = false
     private var autoSelectPending = false
+    /// The item whose preview is loading or shown, so views do not request the same load twice.
+    private(set) var previewTargetID: UUID?
+    /// Display name of the Next shortcut that is actually registered; nil when registration failed.
+    @Published var activeNextShortcut: String? = ShortcutSpec.next.displayName
     /// Set by an observed screen-lock notification and cleared only by unlock or an explicit user action.
     private var screenLocked = false
     /// Undocumented session state is used only as an extra reason to stay suspended.
@@ -179,7 +183,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         selectedIDs.removeAll(); selectionOrder.removeAll()
         queue?.cancel(); queue = nil
         previewPayload = nil; previewThumbnailData = nil; previewThumbnailFinished = false; combinationPreview = ""
-        searchTask?.cancel(); searchResults = []
+        searchTask?.cancel(); searchResults = []; autoSelectPending = false; previewTargetID = nil
     }
     private func contentOperationIsCurrent(_ generation: Int) -> Bool {
         !Task.isCancelled && generation == contentGeneration && !shuttingDown && !lifecycleSuspended && recoveryMessage == nil
@@ -311,6 +315,8 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         if searchQuery.isEmpty { autoSelectPending = true; refreshSearch() } else { searchQuery = "" }
         paletteOpenCount += 1
     }
+    /// Brings an already open palette forward without touching its query or selection.
+    func requestPaletteFocus() { paletteOpenCount += 1 }
     /// Arrow keys from the search field move a single selection through the visible results.
     func moveVisibleSelection(by offset: Int) {
         let items = visibleItems
@@ -337,7 +343,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         guard reset || previousFirst != selectedItems.first?.id else { return }
         previewGeneration += 1
         contentSlots[.preview]?.task.cancel()
-        previewPayload = nil; previewThumbnailData = nil; previewThumbnailFinished = false
+        previewPayload = nil; previewThumbnailData = nil; previewThumbnailFinished = false; previewTargetID = nil
         if let next = selectedItems.first?.id { loadPreview(next) }
     }
     func enableCapture() {
@@ -371,10 +377,13 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     }
     /// Only explicit controls call this. Timers and notifications use resumeCapture().
     func resumeCaptureFromUser() {
-        guard recoveryMessage == nil, state.settings.captureEnabled else { return }
+        guard recoveryMessage == nil else { return }
         acknowledgeUserPresence()
-        resumeCapture()
+        if state.settings.captureEnabled { resumeCapture() }
+        else if captureState == .suspended { resumeIfPermitted(); refreshSearch() }
     }
+    /// Whether wake or unlock may still end the current suspension; exposed for regression tests.
+    var isLifecycleSuspended: Bool { lifecycleSuspended }
     /// A click on a Winnel control proves an active, unlocked session, so it may clear a
     /// suspension whose wake or unlock notification was missed.
     private func acknowledgeUserPresence() {
@@ -384,9 +393,11 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     func captureSkipped(_ reason: CaptureSkipReason) {
         guard captureState == .active, recoveryMessage == nil else { return }
         switch reason {
-        case .oversized: status = "Last copy wasn't saved: it's larger than Winnel's capture limit (\(WinnelStyle.captureLimitLabel(state.settings.captureByteLimit)))."
-        case .invalidImage: status = "Last copy wasn't saved: the image is unreadable or larger than 8192 pixels per side."
-        case .unsupported: status = "Last copy wasn't saved: Winnel keeps text, links, PNG, TIFF and JPEG images, and file references."
+        case .oversized: status = "Last copy wasn't saved: together, its formats exceed Winnel's per-copy limit (\(WinnelStyle.captureLimitLabel(state.settings.captureByteLimit)) of data)."
+        case .invalidImage:
+            let policy = pasteboardService.policy
+            status = "Last copy wasn't saved: the image is unreadable, has several frames, or is larger than \(policy.dimensionLimit) pixels per side or \(policy.pixelLimit / 1_000_000) megapixels."
+        case .unsupported: status = "Last copy wasn't saved: Winnel keeps one text, link or PNG, TIFF or JPEG image per copy, or file references."
         default: break
         }
     }
@@ -496,6 +507,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     func capturePaletteTarget() { paletteTarget = targetService.captureTarget() }
     func loadPreview(_ id: UUID) {
         previewPayload = nil; previewThumbnailData = nil; previewThumbnailFinished = false; previewGeneration += 1
+        previewTargetID = id
         let generation = previewGeneration
         let isImage = state.items.first { $0.id == id }?.kind == .image
         runContentOperation(kind: .preview) { operation in
@@ -571,7 +583,10 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     /// Runs the real library mutation on a copy so confirmations name exactly what would be removed.
     private func simulatedRemovals(_ change: (inout LibraryState) throws -> Set<UUID>) -> Set<UUID> {
         var copy = state
-        return (try? change(&copy)) ?? []
+        guard var removed = try? change(&copy) else { return [] }
+        // The repository save step also trims RAM-only history to its memory budget.
+        if copy.settings.retention == .ramOnly { removed.formUnion(copy.trimUnsavedRAM(budget: LibraryRepository.ramBudget)) }
+        return removed
     }
     func unpinWouldRemove(_ id: UUID) -> Bool { simulatedRemovals { try $0.setPinned(id, false, now: Date()) }.contains(id) }
     func stackRemovalWouldRemove(stackID: UUID, itemID: UUID) -> Bool {
@@ -580,10 +595,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             return try state.setMemberships(stackID, memberships: stack.memberships.filter { $0.itemID != itemID }, now: Date())
         }.contains(itemID)
     }
-    func itemsReleasedByDeletingStack(_ id: UUID) -> Int {
-        let members = Set(state.stacks.first { $0.id == id }?.memberships.map(\.itemID) ?? [])
-        return simulatedRemovals { $0.deleteStack(id, now: Date()) }.intersection(members).count
-    }
+    func itemsRemovedByDeletingStack(_ id: UUID) -> Int { simulatedRemovals { $0.deleteStack(id, now: Date()) }.count }
     /// Mirrors the settings transaction: switching to RAM-only clears unsaved recent items first.
     func itemsRemovedByRetention(_ retention: Retention) -> Int {
         simulatedRemovals { state in
@@ -619,7 +631,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
                 guard contentOperationIsCurrent(operation), queueGeneration == generation else { return }
                 entries.append(.init(item: item, payload: payload))
             }
-            guard contentOperationIsCurrent(operation), queueGeneration == generation, !entries.isEmpty else { return }; queue = .init(entries: entries, mode: mode, now: Date()); status = "Queue ready. Next copies or sends one paste request."
+            guard contentOperationIsCurrent(operation), queueGeneration == generation, !entries.isEmpty else { return }; queue = .init(entries: entries, mode: mode, now: Date()); status = mode == .paste ? "Queue ready. Next validates your target and sends one paste request." : "Queue ready. Each Next copies one item; paste it with Command-V."
         } catch { if contentOperationIsCurrent(operation), queueGeneration == generation { fail(error) } } }
     }
     @discardableResult func expireQueue(now: Date = Date()) -> Bool {

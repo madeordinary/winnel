@@ -758,16 +758,17 @@ extension AppModelTests {
         model.enableCapture(); try await settle { model.captureState == .active }
         model.handleLifecycleSuspension(screenLocked: true)
         model.resumeAfterWake()
-        XCTAssertEqual(model.captureState, .suspended, "Waking to the lock screen must not resume capture")
+        XCTAssertTrue(model.isLifecycleSuspended, "Waking to the lock screen must not end the suspension")
         model.resumeCapture()
+        XCTAssertTrue(model.isLifecycleSuspended, "Automatic resume (timed pause expiry) must not end a lock suspension")
         try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(model.captureState, .suspended, "Automatic resume (timed pause expiry) must not end a lock suspension")
+        XCTAssertEqual(model.captureState, .suspended)
         model.handleScreenUnlocked(); try await settle { model.captureState == .active }
         // A sleep whose wake notification is missed stays suspended until the user acts.
         model.handleLifecycleSuspension()
         model.screenLockProbe = { true }
         model.resumeAfterWake()
-        XCTAssertEqual(model.captureState, .suspended, "A locked session state keeps capture suspended")
+        XCTAssertTrue(model.isLifecycleSuspended, "A locked session state keeps capture suspended")
         model.resumeCaptureFromUser(); try await settle { model.captureState == .active }
         await model.shutdown()
     }
@@ -797,7 +798,7 @@ extension AppModelTests {
         XCTAssertFalse(model.stackRemovalWouldRemove(stackID: stackID, itemID: old.id), "The pin still holds the old item")
         _ = try state.setPinned(old.id, false, now: Date()); model.state = state
         XCTAssertTrue(model.stackRemovalWouldRemove(stackID: stackID, itemID: old.id))
-        XCTAssertEqual(model.itemsReleasedByDeletingStack(stackID), 1)
+        XCTAssertEqual(model.itemsRemovedByDeletingStack(stackID), 1)
         _ = try state.setPinned(old.id, true, now: Date()); _ = state.deleteStack(stackID, now: Date()); model.state = state
         XCTAssertTrue(model.unpinWouldRemove(old.id))
         _ = try state.setPinned(recent.id, false, now: Date()); model.state = state
@@ -816,9 +817,9 @@ extension AppModelTests {
         model.captureSkipped(.marker)
         XCTAssertFalse(model.status.hasPrefix("Last copy wasn't saved"), "Concealed and transient copies stay silent")
         model.captureSkipped(.oversized)
-        XCTAssertEqual(model.status, "Last copy wasn't saved: it's larger than Winnel's capture limit (about 15 MB).")
+        XCTAssertEqual(model.status, "Last copy wasn't saved: together, its formats exceed Winnel's per-copy limit (\(WinnelStyle.captureLimitLabel(model.state.settings.captureByteLimit)) of data).")
         model.captureSkipped(.unsupported)
-        XCTAssertTrue(model.status.hasPrefix("Last copy wasn't saved: Winnel keeps text"))
+        XCTAssertTrue(model.status.hasPrefix("Last copy wasn't saved: Winnel keeps one"))
         await model.shutdown()
     }
 
@@ -840,6 +841,61 @@ extension AppModelTests {
         let invalidPayload = ClipPayload(representations: [.init(type: "public.png", data: Data("synthetic invalid image".utf8))])
         let snapshot = try await repo.ingest(invalidPayload, source: .init(), now: Date(), sessionIDs: [])
         XCTAssertEqual(snapshot.state.items.first { $0.fingerprint == invalidPayload.fingerprint }?.textPreview, "PNG image")
+        await model.shutdown()
+    }
+}
+
+extension AppModelTests {
+    @MainActor func testLockRevokesPendingAutoSelectionSoUnlockLoadsNothing() async throws {
+        let (model, _, _) = try await controlledModel()
+        model.selectedIDs = []; model.selectionOrder = []
+        model.searchQuery = "synthetic"
+        // Lock before the payload search can publish its results.
+        model.handleLifecycleSuspension(screenLocked: true)
+        model.handleScreenUnlocked()
+        try await settle { !model.visibleItems.isEmpty }
+        await model.waitForContentOperations()
+        XCTAssertTrue(model.selectedIDs.isEmpty, "Unlock must not complete a selection requested before the lock")
+        XCTAssertNil(model.previewPayload)
+        await model.shutdown()
+    }
+
+    @MainActor func testUserResumeEndsMissedSuspensionWhileCaptureIsOff() async throws {
+        let (model, _, item) = try await controlledModel()
+        model.handleLifecycleSuspension()
+        model.screenLockProbe = { true }
+        model.resumeAfterWake()
+        XCTAssertTrue(model.isLifecycleSuspended)
+        model.resumeCaptureFromUser()
+        XCTAssertFalse(model.isLifecycleSuspended)
+        XCTAssertEqual(model.captureState, .disabled)
+        XCTAssertFalse(model.state.settings.captureEnabled, "Ending a suspension never turns capture on")
+        model.selectedIDs = [item.id]; model.selectionOrder = [item.id]
+        model.loadPreview(item.id); await model.waitForContentOperations()
+        XCTAssertEqual(model.previewPayload?.plainText, "synthetic protected content")
+        await model.shutdown()
+    }
+
+    @MainActor func testRAMOnlyRemovalPreviewIncludesTheMemoryBudgetTrim() async throws {
+        let (model, _, _) = try await controlledModel()
+        var state = model.state
+        state.settings.retention = .ramOnly
+        let now = Date()
+        let old = ClipboardItem(copiedAt: now.addingTimeInterval(-600), kind: .image, textPreview: "PNG image", payloadByteCount: 10 * 1024 * 1024, fingerprint: "synthetic-old-pinned", isPinned: true)
+        let filler = ClipboardItem(copiedAt: now, kind: .text, textPreview: "synthetic filler", payloadByteCount: 60 * 1024 * 1024, fingerprint: "synthetic-filler")
+        state.items = [old, filler]
+        model.state = state
+        XCTAssertTrue(model.unpinWouldRemove(old.id), "Unpinning would push RAM-only history over its memory budget")
+        await model.shutdown()
+    }
+
+    @MainActor func testMonitorSkipReachesTheStatusThroughTheRealCallback() async throws {
+        let (model, _, _) = try await controlledModel()
+        model.enableCapture(); try await settle { model.captureState == .active }
+        let board = model.pasteboardService.pasteboard
+        board.clearContents(); XCTAssertTrue(board.writeObjects(["synthetic first" as NSString, "synthetic second" as NSString]))
+        model.monitor.poll(); model.monitor.poll()
+        try await settle { model.status.hasPrefix("Last copy wasn't saved: Winnel keeps one") }
         await model.shutdown()
     }
 }

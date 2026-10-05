@@ -104,6 +104,16 @@ public struct LibraryState: Codable, Equatable, Sendable {
         for index in items.indices { items[index].isRecent = false }
         let removed = Set(items.filter { !isSaved($0.id) && !sessionRetainedIDs.contains($0.id) }.map(\.id)); items.removeAll { removed.contains($0.id) }; return removed
     }
+    /// RAM-only history keeps unsaved payloads within the session memory budget, oldest first.
+    @discardableResult public mutating func trimUnsavedRAM(budget: Int) -> Set<UUID> {
+        let unsaved = items.filter { !isSaved($0.id) }
+        var bytes = unsaved.reduce(0) { $0 + $1.payloadByteCount }
+        var removed = Set<UUID>()
+        for item in unsaved.sorted(by: { $0.copiedAt < $1.copiedAt }) where bytes > budget {
+            deleteEverywhere(item.id); bytes -= item.payloadByteCount; removed.insert(item.id)
+        }
+        return removed
+    }
     public mutating func deleteEverywhere(_ id: UUID) {
         items.removeAll { $0.id == id }; for index in stacks.indices { stacks[index].memberships.removeAll { $0.itemID == id } }; if lastUserCopyID == id { lastUserCopyID = nil }
     }

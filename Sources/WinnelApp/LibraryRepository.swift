@@ -90,12 +90,7 @@ actor LibraryRepository {
     }
     private func save(_ candidate: LibraryState, additions: [UUID: ClipPayload], isStillAuthorized: @Sendable () async -> Bool = { true }) async throws -> RepositorySnapshot {
         var candidate = candidate
-        if candidate.settings.retention == .ramOnly {
-            var bytes = candidate.items.filter { !candidate.isSaved($0.id) }.reduce(0) { $0 + $1.payloadByteCount }
-            for item in candidate.items.filter({ !candidate.isSaved($0.id) }).sorted(by: { $0.copiedAt < $1.copiedAt }) where bytes > Self.ramBudget {
-                candidate.deleteEverywhere(item.id); bytes -= item.payloadByteCount
-            }
-        }
+        if candidate.settings.retention == .ramOnly { candidate.trimUnsavedRAM(budget: Self.ramBudget) }
         let persisted = candidate.persistentSnapshot()
         let priorIDs = Set(state.persistentSnapshot().items.map(\.id))
         var newPayloads: [UUID: Data] = [:]

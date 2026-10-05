@@ -117,7 +117,8 @@ struct ItemRow: View {
                 HStack(spacing: 7) {
                     Text(sourceLabel).font(.caption).lineLimit(1)
                     Spacer(minLength: 2)
-                    Text(WinnelStyle.age(item.copiedAt)).font(.caption).lineLimit(1)
+                    // Refreshes once a minute so a long-lived palette never shows a stale age.
+                    TimelineView(.everyMinute) { context in Text(WinnelStyle.age(item.copiedAt, now: context.date)).font(.caption).lineLimit(1) }
                     if item.isPinned { Image(systemName: "pin.fill").font(.caption).accessibilityLabel("Pinned") }
                 }.foregroundStyle(.secondary)
             }

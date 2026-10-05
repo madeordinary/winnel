@@ -31,6 +31,8 @@ final class PalettePanel: NSPanel {
         // @Published emits before the new value is stored; refresh on the next main-queue turn.
         model.$captureState.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.refreshMenu() }.store(in: &subscriptions)
         model.$queue.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.refreshMenu() }.store(in: &subscriptions)
+        // Turning capture off changes the saved setting after the monitor state has already published.
+        model.$state.map(\.settings.captureEnabled).removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self] _ in self?.refreshMenu() }.store(in: &subscriptions)
         model.$recoveryMessage.sink { [weak self] message in
             guard let self else { return }
             if message == nil {
@@ -107,15 +109,18 @@ final class PalettePanel: NSPanel {
         let palette = ShortcutSpec(keyCode: configuration.paletteShortcutKeyCode, modifiers: configuration.paletteShortcutModifiers)
         let next = ShortcutSpec(keyCode: configuration.nextShortcutKeyCode, modifiers: configuration.nextShortcutModifiers)
         if !shortcuts.configure(palette: palette, next: next), let error = shortcuts.error { model.status = error }
+        model.activeNextShortcut = shortcuts.activeNext?.displayName; refreshMenu()
     }
     func refreshMenu() {
         let menu = NSMenu()
+        // Explicit isEnabled values below must not be overridden by automatic validation.
+        menu.autoenablesItems = false
         let state = model.captureState
         if let queue = model.queue {
             let count = queue.entries.count, position = min(queue.position + 1, count)
-            let next = ShortcutSpec(keyCode: model.state.settings.nextShortcutKeyCode, modifiers: model.state.settings.nextShortcutModifiers).displayName
-            info(queue.isComplete ? "Queue complete: \(count) items sent" : "Queue \(position) of \(count): " + WinnelStyle.displayText(String((queue.current?.item.textPreview ?? "").prefix(40))), to: menu)
-            add(queue.mode == .copy ? "Copy Next Item (\(next))" : "Paste Next Item (\(next))", action: #selector(queueNext), to: menu).isEnabled = queue.current != nil
+            let next = model.activeNextShortcut.map { " (\($0))" } ?? ""
+            info(queue.isComplete ? (queue.mode == .copy ? "Queue complete: \(count) items copied" : "Queue complete: \(count) paste requests sent") : "Queue \(position) of \(count): " + WinnelStyle.displayText(String((queue.current?.item.textPreview ?? "").prefix(40))), to: menu)
+            add(queue.mode == .copy ? "Copy Next Item" + next : "Paste Next Item" + next, action: #selector(queueNext), to: menu).isEnabled = queue.current != nil
             add("Back", action: #selector(queueBack), to: menu).isEnabled = queue.position > 0
             add("Cancel Queue", action: #selector(queueCancel), to: menu)
             menu.addItem(.separator())
@@ -124,8 +129,9 @@ final class PalettePanel: NSPanel {
         add("Saved Stacks", action: #selector(openLibrary), to: menu)
         menu.addItem(.separator())
         info(state.label, to: menu)
+        if state == .suspended { add("Resume After Lock or Sleep", action: #selector(resumeFromSuspension), to: menu) }
         if !model.state.settings.captureEnabled { add("Turn On Capture", action: #selector(toggleCapture), to: menu) }
-        else { add(state == .active ? "Pause Capture" : "Resume Capture", action: #selector(toggleCapture), to: menu) }
+        else if state != .suspended { add(state == .active ? "Pause Capture" : "Resume Capture", action: #selector(toggleCapture), to: menu) }
         add("Settings…", action: #selector(openSettings), to: menu)
         menu.addItem(.separator()); add("Quit Winnel", action: #selector(quit), to: menu)
         statusItem?.menu = menu
@@ -138,6 +144,7 @@ final class PalettePanel: NSPanel {
     @discardableResult private func add(_ title: String, action: Selector, to menu: NSMenu) -> NSMenuItem { let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; menu.addItem(item); return item }
     private func info(_ title: String, to menu: NSMenu) { let item = NSMenuItem(title: title, action: nil, keyEquivalent: ""); item.isEnabled = false; menu.addItem(item) }
     @objc private func queueNext() { model.nextInQueue() }
+    @objc private func resumeFromSuspension() { model.resumeCaptureFromUser() }
     @objc private func queueBack() { model.backInQueue() }
     @objc private func queueCancel() { model.cancelQueue() }
     @objc private func openPalette() { showPalette() }
@@ -148,7 +155,10 @@ final class PalettePanel: NSPanel {
     func showPalette() {
         guard NSApp.modalWindow == nil else { return }
         model.capturePaletteTarget()
-        model.prepareForPaletteOpen()
+        // Only a fresh opening starts a new session. Re-focusing a visible palette, or opening it
+        // while a sheet still depends on the shared selection, keeps the user's query and selection.
+        if panel?.isVisible != true, panel?.attachedSheet == nil, library?.attachedSheet == nil { model.prepareForPaletteOpen() }
+        else { model.requestPaletteFocus() }
         if panel == nil {
             let storedSize = UserDefaults.standard.string(forKey: "paletteSize").map(NSSizeFromString) ?? NSSize(width: 760, height: 600)
             let size = NSSize(width: max(620, min(storedSize.width, 1000)), height: max(420, min(storedSize.height, 900)))

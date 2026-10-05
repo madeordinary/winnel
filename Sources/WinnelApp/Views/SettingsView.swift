@@ -71,7 +71,7 @@ struct SettingsView: View {
                             Menu("Pause capture") { Button("15 minutes") { model.pause(until: Date().addingTimeInterval(15 * 60)) }; Button("1 hour") { model.pause(until: Date().addingTimeInterval(60 * 60)) }; Button("Until midnight") { model.pause(until: Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date())) ?? Date().addingTimeInterval(86_400)) }; Button("Until I resume") { model.pause(until: nil) } }
                                 .fixedSize().disabled(!model.state.settings.captureEnabled || model.captureState == .disabled)
                             Button("Resume") { model.resumeCaptureFromUser() }
-                                .disabled(!model.state.settings.captureEnabled || model.captureState == .active || model.captureState == .disabled)
+                                .disabled(model.captureState != .suspended && (!model.state.settings.captureEnabled || model.captureState == .active || model.captureState == .disabled))
                         }
                         if let until = model.state.settings.pauseUntil { Text("Scheduled resume: \(until.formatted(date: .abbreviated, time: .shortened))").font(.callout) }
                         Text("Resume starts with the current clipboard counter and does not import copies made during the pause. Capture also stops on lock, sleep and user switch.").font(.callout).foregroundStyle(.secondary)
@@ -101,8 +101,8 @@ struct SettingsView: View {
                         Text("Up to \(model.state.settings.recentLimit) unsaved recent items. Pins and saved stacks are persistent exceptions. Removing a final saved reference keeps an item only while its actual copy time is eligible.").font(.callout).foregroundStyle(.secondary)
                         LabeledContent("Managed storage", value: WinnelStyle.bytes(model.usageBytes))
                         LabeledContent("Storage budget", value: WinnelStyle.bytes(model.state.settings.storageByteLimit))
-                        LabeledContent("Largest single copy", value: "About " + WinnelStyle.bytes(model.state.settings.captureByteLimit / 4 * 3))
-                            .help("Winnel measures each copy after encoding, up to \(WinnelStyle.bytes(model.state.settings.captureByteLimit)); that leaves room for about three quarters as much original data.")
+                        LabeledContent("Capture limit per copy", value: "About " + WinnelStyle.bytes(model.state.settings.captureByteLimit / 4 * 3))
+                        Text("All formats of one copy count together, measured after encoding (\(WinnelStyle.bytes(model.state.settings.captureByteLimit))). An app that offers the same content in several formats uses more of the limit.").font(.callout).foregroundStyle(.secondary)
                         Text("Saved content is never silently evicted. If it fills the budget, capture pauses so you can manage it.").font(.callout).foregroundStyle(.secondary)
                     }.padding(8)
                 }

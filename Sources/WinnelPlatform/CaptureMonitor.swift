@@ -88,7 +88,11 @@ public enum CaptureState: String, Sendable { case disabled, active, paused, susp
                 switch result {
                 case let .captured(payload, attribution): onCapture(payload, attribution)
                 case .skipped(let reason) where reason == .permissionDenied || reason == .permissionRequired: pause(); onCaptureFailure(reason)
-                case .skipped(let reason) where [.oversized, .invalidImage, .unsupported].contains(reason): onCaptureSkipped(reason)
+                case .skipped(let reason) where [.oversized, .invalidImage, .unsupported].contains(reason):
+                    // Size and image checks run before the settled-marker recheck; a provider may
+                    // have marked the copy concealed since. Such copies stay silent.
+                    let marked = service.pasteboard.pasteboardItems?.contains { item in item.types.contains { CapturePolicy.blockedMarkers.contains($0.rawValue) } } ?? true
+                    if !marked { onCaptureSkipped(reason) }
                 default: break
                 }
             }

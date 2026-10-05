@@ -70,4 +70,14 @@ final class LibraryTests: XCTestCase {
         let clip = item("young"); var state = LibraryState(items: [clip]); try state.setPinned(clip.id, true, now: now); state.clearRecent(); try state.setPinned(clip.id, false, now: now)
         XCTAssertEqual(state.recentItems.map(\.id), [clip.id])
     }
+    func testRAMTrimRemovesOldestUnsavedItemsAndKeepsSavedOnes() {
+        let now = Date()
+        let pinned = ClipboardItem(copiedAt: now.addingTimeInterval(-300), kind: .text, textPreview: "pinned", payloadByteCount: 50, fingerprint: "p", isPinned: true)
+        let oldest = ClipboardItem(copiedAt: now.addingTimeInterval(-200), kind: .text, textPreview: "oldest", payloadByteCount: 40, fingerprint: "o")
+        let newest = ClipboardItem(copiedAt: now, kind: .text, textPreview: "newest", payloadByteCount: 40, fingerprint: "n")
+        var state = LibraryState(items: [pinned, oldest, newest])
+        XCTAssertEqual(state.trimUnsavedRAM(budget: 50), [oldest.id])
+        XCTAssertEqual(Set(state.items.map(\.id)), [pinned.id, newest.id])
+        XCTAssertEqual(state.trimUnsavedRAM(budget: 50), [])
+    }
 }

@@ -122,11 +122,11 @@ struct LibraryView: View {
         .sheet(isPresented: $combine) { CombinationSheet(model: model, stackID: stackID) }
         .sheet(isPresented: $export) { ExportOptionsSheet(model: model, stackID: stackID) }
         .alert("Delete this stack?", isPresented: $confirmDeleteStack) { Button("Cancel", role: .cancel) {}; Button("Delete stack", role: .destructive) { if let id = stackID { model.deleteStack(id) }; stackID = nil } } message: {
-            let released = stackID.map(model.itemsReleasedByDeletingStack) ?? 0
-            Text("Only this stack is removed. Pins, other stack memberships and eligible recent items remain." + (released > 0 ? " \(released) \(released == 1 ? "item is" : "items are") past recent retention with no other saved reference and will be removed." : ""))
+            let removed = stackID.map(model.itemsRemovedByDeletingStack) ?? 0
+            Text("Only this stack is removed. Pins, other stack memberships and eligible recent items remain." + (removed > 0 ? " \(removed) \(removed == 1 ? "item falls" : "items fall") outside recent history (its time window or item limit) with no other saved reference and will be removed from Winnel." : ""))
         }
-        .alert("Unpin and remove this item?", isPresented: $confirmUnpin) { Button("Cancel", role: .cancel) {}; Button("Unpin and remove", role: .destructive) { if let id = memberID { model.togglePin(id) } } } message: { Text("It is older than your recent-history window and has no other saved reference, so unpinning removes it from Winnel.") }
-        .alert("Remove from stack and delete?", isPresented: $confirmRemoveMember) { Button("Cancel", role: .cancel) {}; Button("Remove", role: .destructive) { removeSelectedMember() } } message: { Text("This is the item's last saved reference and it is older than your recent-history window, so it will be removed from Winnel.") }
+        .alert("Unpin and remove this item?", isPresented: $confirmUnpin) { Button("Cancel", role: .cancel) {}; Button("Unpin and remove", role: .destructive) { if let id = memberID { model.togglePin(id) } } } message: { Text("It has no other saved reference and falls outside your recent history (its time window or item limit), so unpinning removes it from Winnel.") }
+        .alert("Remove from stack and delete?", isPresented: $confirmRemoveMember) { Button("Cancel", role: .cancel) {}; Button("Remove", role: .destructive) { removeSelectedMember() } } message: { Text("This is the item's last saved reference and it falls outside your recent history (its time window or item limit), so it will be removed from Winnel.") }
         .alert("Delete this item everywhere?", isPresented: $confirmDeleteItem) { Button("Cancel", role: .cancel) {}; Button("Delete everywhere", role: .destructive) { if let id = memberID { model.deleteEverywhere(id) }; memberID = nil } } message: { Text("Remove from recent history, pins and all affected stacks: \(memberID.map { model.state.affectedStacks(for: $0).map(\.name).joined(separator: ", ") } ?? ""). Original files and exports remain.") }
     }
     private func memberCards(_ stack: SavedStack) -> some View {

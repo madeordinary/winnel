@@ -37,8 +37,10 @@ struct PaletteView: View {
                         Button("Saved stacks") { model.onShowLibrary?() }
                         Button("Settings") { model.onShowSettings?() }
                         Divider()
+                        if model.captureState == .suspended { Button("Resume after lock or sleep") { model.resumeCaptureFromUser() } }
                         if !model.state.settings.captureEnabled { Button("Turn on capture") { model.enableCapture() } }
-                        else if model.isPaused { Button("Resume capture") { model.resumeCaptureFromUser() } }
+                        else if model.captureState == .paused { Button("Resume capture") { model.resumeCaptureFromUser() } }
+                        else if model.captureState == .suspended { EmptyView() }
                         else { Button("Pause capture for 15 minutes") { model.pause(until: Date().addingTimeInterval(900)) }; Button("Pause until I resume") { model.pause(until: nil) } }
                     } label: { Image(systemName: "ellipsis.circle") }
                         .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Capture, library and settings")
@@ -96,7 +98,7 @@ struct PaletteView: View {
             model.selectionOrder = model.selectionOrder.filter { new.contains($0) } + model.visibleItems.filter { new.contains($0.id) && !old.contains($0.id) && !model.selectionOrder.contains($0.id) }.map(\.id)
         }
         .onChange(of: model.selectedItems.first?.id) { _, id in
-            if let id { model.loadPreview(id) }
+            if let id, id != model.previewTargetID { model.loadPreview(id) }
         }
         .onExitCommand { model.cancelQueue(); model.onDismissPalette?() }
         .sheet(isPresented: $createStack) { NamedTextSheet(title: "Create a saved stack", fieldLabel: "Stack name", actionLabel: "Create stack", initialValue: "") { model.createStack(name: $0) } }
@@ -113,7 +115,7 @@ struct PaletteView: View {
         .alert("Unpin and remove this item?", isPresented: Binding(get: { unpinItem != nil }, set: { if !$0 { unpinItem = nil } })) {
             Button("Cancel", role: .cancel) { unpinItem = nil }
             Button("Unpin and remove", role: .destructive) { if let item = unpinItem { model.togglePin(item.id) }; unpinItem = nil }
-        } message: { Text("It is older than your recent-history window and is not in a stack, so unpinning removes it from Winnel.") }
+        } message: { Text("It has no other saved reference and falls outside your recent history (its time window or item limit), so unpinning removes it from Winnel.") }
     }
     @ViewBuilder private var itemList: some View {
         if model.visibleItems.isEmpty {
@@ -235,14 +237,13 @@ struct PayloadPreviewView: View {
 
 struct QueueStatusView: View {
     @ObservedObject var model: AppModel
-    private var nextShortcut: String { ShortcutSpec(keyCode: model.state.settings.nextShortcutKeyCode, modifiers: model.state.settings.nextShortcutModifiers).displayName }
     var body: some View {
         if let queue = model.queue {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(queue.isComplete ? "Queue complete" : "Queue · \(min(queue.position + 1, queue.entries.count)) of \(queue.entries.count)").font(.headline)
-                    Text(queue.isComplete ? "All \(queue.entries.count) items sent. Back lets you retry." : WinnelStyle.displayText(queue.current?.item.textPreview ?? "")).font(.callout).lineLimit(1)
-                    Text("Next: \(nextShortcut) works from any app. Escape here cancels the queue.").font(.caption).foregroundStyle(.secondary)
+                    Text(queue.isComplete ? (queue.mode == .copy ? "All \(queue.entries.count) items copied. Back lets you copy one again." : "All \(queue.entries.count) paste requests sent; delivery is unconfirmed. Back lets you retry.") : WinnelStyle.displayText(queue.current?.item.textPreview ?? "")).font(.callout).lineLimit(1)
+                    Text(model.activeNextShortcut.map { "Next: \($0) works from any app. Escape here cancels the queue." } ?? "The Next shortcut is unavailable; use the button here or the menu bar. Escape here cancels the queue.").font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
                 if model.directPasteAvailable {
@@ -250,7 +251,7 @@ struct QueueStatusView: View {
                 }
                 Button("Back") { model.backInQueue() }.disabled(queue.position == 0)
                 Button(queue.mode == .copy ? "Copy Next Item" : "Paste Next Item") { model.nextInQueue() }.disabled(queue.current == nil)
-                    .accessibilityHint("Shortcut \(nextShortcut)")
+                    .accessibilityHint(model.activeNextShortcut.map { "Shortcut \($0)" } ?? "")
                 Button("Cancel Queue") { model.cancelQueue() }
             }.accessibilityElement(children: .contain).accessibilityLabel("Sequential queue")
         }
@@ -285,7 +286,7 @@ struct CombinationSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             WinnelSectionHeader(title: "Combine \(model.selectedItems.count) \(model.selectedItems.count == 1 ? "item" : "items")", subtitle: "One preview. Exactly what you will copy.", symbol: "text.badge.plus")
             Picker("Format", selection: Binding(get: { model.combinationFormat }, set: { model.prepareCombination(format: $0, stackID: stackID) })) { ForEach(CombinationFormat.allCases, id: \.self) { Text($0.label).tag($0) } }
-            Text("Copy, Paste and Export use this exact preview. Original items stay unchanged.").font(.callout).foregroundStyle(.secondary)
+            Text(model.directPasteAvailable ? "Copy, Paste and Export use this exact preview. Original items stay unchanged." : "Copy and Export use this exact preview. Original items stay unchanged.").font(.callout).foregroundStyle(.secondary)
             ScrollView {
                 if model.combinationLoading && model.combinationPreview.isEmpty { ProgressView("Preparing preview…").frame(maxWidth: .infinity).padding(24) }
                 else { Text(model.combinationPreview.isEmpty ? "No compatible preview. Select text or links; Markdown links need a copied URL or an explicit stack association." : model.combinationPreview).font(.system(.body, design: .monospaced)).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(12) }

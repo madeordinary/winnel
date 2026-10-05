@@ -239,21 +239,29 @@ final class PlatformTests: XCTestCase {
     @MainActor func testMonitorReportsOversizedCopyButKeepsConcealedCopySilent() async throws {
         let board = NSPasteboard(name: .init("winnel-test-\(UUID().uuidString)"))
         defer { board.releaseGlobally() }
-        var policy = CapturePolicy(); policy.byteLimit = 64
-        var copies = 0; var skipped: [CaptureSkipReason] = []
-        let monitor = CaptureMonitor(service: .init(pasteboard: board, policy: policy), onCapture: { _, _ in copies += 1 }, onCaptureSkipped: { skipped.append($0) })
+        var policy = CapturePolicy(); policy.byteLimit = 2_048
+        var captured: [String] = []; var skipped: [CaptureSkipReason] = []
+        let monitor = CaptureMonitor(service: .init(pasteboard: board, policy: policy), onCapture: { payload, _ in captured.append(payload.plainText ?? "") }, onCaptureSkipped: { skipped.append($0) })
         monitor.enable()
         defer { monitor.stop() }
-        board.clearContents(); XCTAssertTrue(board.setString(String(repeating: "x", count: 200), forType: .string))
+        func settle(_ condition: () -> Bool) async throws {
+            let deadline = Date().addingTimeInterval(2)
+            while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        }
+        board.clearContents(); XCTAssertTrue(board.setString(String(repeating: "x", count: 4_000), forType: .string))
         monitor.poll(); monitor.poll()
-        let deadline = Date().addingTimeInterval(2)
-        while skipped.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
-        XCTAssertEqual(skipped, [.oversized]); XCTAssertEqual(copies, 0)
+        try await settle { !skipped.isEmpty }
+        XCTAssertEqual(skipped, [.oversized]); XCTAssertTrue(captured.isEmpty)
+        // An oversized copy that is also marked concealed stays silent.
         let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
-        board.declareTypes([.string, concealed], owner: nil); board.setString("synthetic secret", forType: .string); board.setData(Data(), forType: concealed)
+        board.declareTypes([.string, concealed], owner: nil); board.setString(String(repeating: "s", count: 4_000), forType: .string); board.setData(Data(), forType: concealed)
         monitor.poll(); monitor.poll()
-        try await Task.sleep(for: .milliseconds(200))
-        XCTAssertEqual(skipped, [.oversized]); XCTAssertEqual(copies, 0)
+        // A later ordinary copy proves the monitor processed the concealed change.
+        board.clearContents(); XCTAssertTrue(board.setString("synthetic sentinel", forType: .string))
+        monitor.poll(); monitor.poll()
+        try await settle { !captured.isEmpty }
+        XCTAssertEqual(captured, ["synthetic sentinel"])
+        XCTAssertEqual(skipped, [.oversized])
     }
     @MainActor func testModifierWaitRechecksCurrentActionAndCancellation() async throws {
         var stillCurrent = true
