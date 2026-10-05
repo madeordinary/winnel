@@ -83,6 +83,18 @@ Recorded 2026-10-04 for the closer [visual direction and competitor comparison](
 
 Application-source fingerprint: `1c4a64a5816d8756da648ff37a100d67aaa84f6d5488b5a9519df3b66f3e8c0c`. Executable SHA-256: `85f9f4b22a05d6bc36b5e361aa93a18a031ef83bc6604c2c4e5da06556c88b59`. Development ZIP SHA-256: `9144540a7e9c790b217692dc94d0b8139a63dfff26631af445cba4a2961c3f1e`. The fingerprint uses the per-file method above; private receipts retain exact file hashes and command outcomes. The development ZIP was not distributed.
 
+## Keyboard and safety follow-up
+
+Recorded 2026-10-04 for the [keyboard and safety follow-up](ui-revamp.md#keyboard-and-safety-follow-up). The palette starts each fresh opening on the newest item and selects the first search result once results publish; arrow keys and Return work from the search field, and a hidden Edit menu provides standard editing shortcuts. Capture state uses one wording with a changing menu-bar symbol; wake after an observed lock waits for unlock, and an explicit control ends a missed suspension while keeping the saved capture choice. The menu bar shows queue position and controls; stacks can start queues; Escape cancels the queue only from the palette or Library. Multi-item deletion and removal confirmations use the real library mutations on a copy, including the RAM-only memory trim. Paste-only controls and the Accessibility request are hidden while no app is verified for direct paste.
+
+- **149 XCTest tests, zero failures, exit 0**, with test-process network denied, on the final application source; the suite passed in three consecutive runs before the final diagnostics-only fixture change and once after it. Eighteen new tests cover first-result selection and user precedence, palette-open revocation, arrow movement, lock/wake/user resume (including keeping a user's pause and capture-off), auto-selection revocation on lock, multi-item deletion, removal previews against the real mutations and the RAM-only trim, skipped-copy reporting through the monitor callback, concealed-copy silence, image naming and Return labeling.
+- Two read-only code review rounds of the candidate found issues that were fixed before the final source, each with a regression where it is testable. The most significant: re-focusing the palette replaced a selection that an open sheet depended on, and resuming from a missed lock suspension could cancel a pause the user had chosen. Status-menu items now honor their enabled state, and skip messages state the combined-format limit.
+- Optimized ad-hoc packaging, extracted signature verification and executable/license equality passed.
+- **38 actual SwiftUI component renders** from synthetic in-memory state, adding a search with its auto-selected first match, the Library queue strip, and an empty Library with no stacks. Inspected palette light/dark, search, minimum queue, the larger-text variant, Library cards/list/minimum/queue/empty, and Settings capture/storage/shortcuts. Rows use the native list highlight as their only selection style. The Library header fits one row only in wide windows and uses two compact rows at 900–1000 pt.
+- No native UI acceptance ran for this change. Arrow keys, Return and focus in the real palette; Edit-menu key equivalents in the nonactivating panel; the status item symbol, title and queue menu; lock, sleep and wake delivery and the undocumented session lock key; the app picker; and VoiceOver remain unverified.
+
+Application-source fingerprint: `bba12662ca9fd0c1346ef00b640e6bb7f7b03b5db0039c48bc24c64e367c8555`. Executable SHA-256: `bcf55ebca589e6ec47de010383d695172ccb3e746c23c1fdecbd8ea9021d43d8`. Development ZIP SHA-256: `927945dfa73a416610cdd937b5dc3c2c18d92b8217e40d2c574bdd06630d7d3c`. The fingerprint uses the per-file method above. The development ZIP was not distributed.
+
 ## Remaining verification
 
 Use synthetic fixtures and record source revision, OS/toolchain/device, exact steps, expected versus actual output and failures. Avoid extrapolating historical observations to later binaries.
@@ -91,7 +103,7 @@ Use synthetic fixtures and record source revision, OS/toolchain/device, exact st
 - Clipboard/paste: exact app/version/build/control trials, adversarial focus/caret/modifier changes and observed destination consumption; production direct-paste allowlist remains empty.
 - Library/retention: durable production reopen, age/count/storage boundaries in native UX, saved-item deletion/recovery and RAM-only lifecycle.
 - Combine/export: complete five-format native preview, JSON selection/export, missing/protected/relative file labels and remaining cancellation/collision flows.
-- Queue: shortcut configuration/conflicts, mode changes, Escape and real lifecycle cancellation.
+- Queue: shortcut configuration/conflicts, mode changes, Escape and real lifecycle cancellation, and the menu-bar queue indicator.
 - Recovery: actual Keychain denial/lock, corruption, disk-full and revoked permission causes.
 - Accessibility/appearance: all keyboard and VoiceOver flows, sizing, light/dark, scaling, contrast and reduced motion.
 - Performance/release: cold launch/palette/reference M1/macOS 14/external display, two-week beta, naming checks, signing/notarization and binary release.

@@ -66,9 +66,9 @@ This exercises simulated key unavailability and the actual recovery controls. It
 
 ## Everyday controls
 
-Open the palette with Command-Shift-Space; use Command-Shift-N for the explicit queue's Next action. Change either shortcut in Settings. Ordinary Command-V remains the system paste command. The menu bar opens the palette, saved stacks and Settings.
+Open the palette with Command-Shift-Space; use Command-Shift-N for the explicit queue's Next action. Change either shortcut in Settings. Ordinary Command-V remains the system paste command. The menu bar opens the palette, saved stacks and Settings, shows whether capture is on, and shows an active queue's position with Next, Back and Cancel.
 
-Enable capture in onboarding or Settings. Pause immediately or until a displayed time, exclude apps by bundle identity, search, pin, save ordered stacks, combine text, or export the previewed material. Copy and Paste intentionally replace the clipboard. The app never restores old clipboard contents after a delay.
+Enable capture in onboarding or Settings. Pause immediately or until a displayed time, exclude apps by choosing them or entering a bundle identifier, search, pin, save ordered stacks, combine text, or export the previewed material. Copy and Paste intentionally replace the clipboard. The app never restores old clipboard contents after a delay.
 
 Accessibility is optional and requested only from an explicit user action. Clipboard permission may also be controlled by macOS. A denied or ambiguous permission or target uses visible recovery or manual behavior. The app does not grant permissions itself. Terminal, secure, unknown and unvalidated targets use manual Copy. A paste-event dispatch is not proof the destination consumed it.
 

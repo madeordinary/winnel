@@ -8,7 +8,7 @@ Requests use HTTPS with system TLS validation, an ephemeral session, no cookies/
 
 The update metadata is authenticated by HTTPS, not a cryptographic app-update signature. The app does not contain a self-updater. Before public release, downloaded app bundles must be Developer ID signed/notarized and verified by macOS; release tooling describes signing verification. No public signed build is claimed here.
 
-The operating system clipboard is observable by other local applications. App writes request current-host-only contents, but this does not retract other apps' observations. Capturing never alters someone else's clipboard to suppress Universal Clipboard. Exclusions, source attribution and marker handling are best effort; pause is the clear option to stop collection. Polling can miss rapid copies.
+The operating system clipboard is observable by other local applications. App writes request current-host-only contents, but this does not retract other apps' observations. Capturing never alters someone else's clipboard to suppress Universal Clipboard. Copies that the system marks as arriving from another device through Universal Clipboard are skipped rather than recorded. Exclusions, source attribution and marker handling are best effort; pause is the clear option to stop collection. Polling can miss rapid copies.
 
 App storage is encrypted at rest, including metadata. This does not protect against every program running as the user, a compromised/unlocked Mac, OS snapshots/backups or user-created exports. Clearing app data does not clear clipboard/exports/original files. A separate clear clipboard action rechecks the approved change counter; macOS exposes no atomic compare-and-clear API. No forensic erasure claim is made.
 
