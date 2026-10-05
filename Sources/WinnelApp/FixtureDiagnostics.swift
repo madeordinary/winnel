@@ -37,6 +37,18 @@ import WinnelCore
         unsupportedModel.state = model.state
         let imageItem = unsupportedModel.state.items.first { $0.kind == .image }!
         unsupportedModel.selectedIDs = [imageItem.id]; unsupportedModel.selectionOrder = [imageItem.id]
+        let emptyLibraryModel = AppModel(fixtureMode: true)
+        emptyLibraryModel.state = model.state; emptyLibraryModel.state.stacks = []
+        // A typed query selects its first match once results publish, as in the palette.
+        let searchModel = AppModel(fixtureMode: true)
+        searchModel.state = model.state
+        searchModel.searchQuery = "entry 1"
+        if let first = searchModel.selectedItems.first { searchModel.previewPayload = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data(first.textPreview.utf8))]) }
+        let libraryQueueModel = AppModel(fixtureMode: true)
+        libraryQueueModel.state = model.state
+        let queued = stack.memberships.prefix(5).compactMap { membership in model.state.items.first { $0.id == membership.itemID } }
+        libraryQueueModel.queue = .init(entries: queued.map { .init(item: $0, payload: ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data($0.textPreview.utf8))])) }, now: Date())
+        libraryQueueModel.queue?.recordDispatch(success: true, now: Date())
         var captures: [String] = []
         let previousAppearance = NSApp.appearance
         defer { NSApp.appearance = previousAppearance }
@@ -47,7 +59,7 @@ import WinnelCore
                 ("library", .init(width: 1000, height: 720), AnyView(LibraryView(model: libraryModel, initialStackID: stack.id, initialMemberID: member.id))),
                 ("library-cards", .init(width: 1000, height: 720), AnyView(LibraryView(model: libraryModel, initialStackID: stack.id))),
                 ("library-list", .init(width: 900, height: 500), AnyView(LibraryView(model: libraryModel, initialStackID: stack.id, initialMemberID: member.id, initialPresentation: .list))),
-                ("library-empty", .init(width: 900, height: 500), AnyView(LibraryView(model: model))),
+                ("library-empty", .init(width: 900, height: 500), AnyView(LibraryView(model: emptyLibraryModel))),
                 ("export", .init(width: 540, height: 760), AnyView(ExportOptionsSheet(model: model))),
                 ("combination", .init(width: 560, height: 480), AnyView(CombinationSheet(model: model))),
                 ("queue", .init(width: 760, height: 660), AnyView(PaletteView(model: queueModel))),
@@ -71,6 +83,8 @@ import WinnelCore
             ("queue-light-minimum", .init(width: 620, height: 420), AnyView(PaletteView(model: queueModel))),
             ("palette-filter-empty", .init(width: 620, height: 420), AnyView(PaletteView(model: filteredModel))),
             ("palette-combine-unavailable", .init(width: 620, height: 420), AnyView(PaletteView(model: unsupportedModel))),
+            ("palette-search", .init(width: 760, height: 660), AnyView(PaletteView(model: searchModel))),
+            ("library-queue", .init(width: 1000, height: 720), AnyView(LibraryView(model: libraryQueueModel, initialStackID: stack.id))),
             ("export-light-minimum", .init(width: 500, height: 380), AnyView(ExportOptionsSheet(model: model))),
             ("settings-storage", .init(width: 680, height: 600), AnyView(SettingsView(model: model, initialSection: .storage))),
             ("settings-shortcuts", .init(width: 680, height: 600), AnyView(SettingsView(model: model, initialSection: .shortcuts))),
@@ -113,7 +127,7 @@ import WinnelCore
             "rendering": "Native window background drawn by the actual hosting root; explicit SwiftUI color scheme and AppKit appearance; sampled bitmap opacity verified before PNG encoding.",
             "measurements": ["samples": 100, "coreSearchP95Milliseconds": p95(search), "hostingLayoutP95Milliseconds": p95(layout), "searchResultChecksum": matched],
             "diagnosticThresholds": ["coreSearchP95AtMost100ms": p95(search) <= 100, "hostingLayoutP95AtMost100ms": p95(layout) <= 100],
-            "unverified": ["Keyboard and VoiceOver interaction", "Real palette opening and shortcut latency", "Cold launch", "30-minute CPU/RSS", "Reference M1 hardware fixture", "Cross-app paste and AX notification behavior", "Encrypted repository search timing"],
+            "unverified": ["Keyboard and VoiceOver interaction", "Arrow keys and Return from the search field", "Edit-menu key equivalents in the nonactivating palette", "Menu-bar status item, queue position and capture symbol", "Lock, sleep and wake suspension", "Real palette opening and shortcut latency", "Cold launch", "30-minute CPU/RSS", "Reference M1 hardware fixture", "Cross-app paste and AX notification behavior", "Encrypted repository search timing"],
             "privacy": "Named fixture pasteboard is configured; no clipboard payloads are read or written. No capture, Keychain, permission prompts or OS screenshot APIs are used."
         ]
         let bytes = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
@@ -157,7 +171,7 @@ import WinnelCore
         var items: [ClipboardItem] = []
         for index in 0..<1200 {
             let kind: ClipKind = index % 12 == 0 ? .image : index % 12 == 1 ? .files : index % 12 == 2 ? .url : .text
-            let text = kind == .url ? "https://example.invalid/synthetic/\(index)" : kind == .files ? "Reference: synthetic-\(index).txt" : kind == .image ? "Synthetic image \(index)" : "Synthetic entry \(index): A small example excerpt for local search and saved stacks."
+            let text = kind == .url ? "https://example.invalid/synthetic/\(index)" : kind == .files ? "Reference: synthetic-\(index).txt" : kind == .image ? "PNG image · 1600 × \(900 + index)" : "Synthetic entry \(index): A small example excerpt for local search and saved stacks."
             items.append(.init(copiedAt: now.addingTimeInterval(-Double(index) * 10), source: .init(bundleIdentifier: "org.madeordinary.winnel.fixture", name: "Winnel Synthetic Fixture", confidence: .inferred), kind: kind, textPreview: text, payloadByteCount: 256, fingerprint: "synthetic-\(index)", isRecent: index < 200))
         }
         let stacks = stride(from: 200, to: 1200, by: 50).map { start in SavedStack(name: "Synthetic collection \((start - 200) / 50 + 1)", memberships: items[start..<start + 50].map { .init(itemID: $0.id) }) }
