@@ -14,6 +14,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             guard searchQuery != oldValue else { return }
             reconcileVisibleSelection(allowedIDs: [], reset: true)
             searchResults = []
+            autoSelectPending = true
             refreshSearch()
         }
     }
@@ -29,10 +30,13 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     @Published var usageBytes = 0
     @Published var combinationPreview = ""
     @Published var combinationFormat: CombinationFormat = .newline
+    @Published private(set) var combinationLoading = false
     @Published var previewPayload: ClipPayload?
     @Published private(set) var previewThumbnailData: Data?
     @Published private(set) var previewThumbnailFinished = false
     @Published private var searchResults: [ClipboardItem] = []
+    /// Incremented each time the palette opens so its view can focus search.
+    @Published private(set) var paletteOpenCount = 0
     let fixtureMode: Bool
     let fixtureRecovery: Bool
     private(set) var fixtureRecoverySeed: FixtureRecoverySeed?
@@ -67,6 +71,11 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     private var startupComplete = false
     private var shuttingDown = false
     private var explicitPause = false
+    private var autoSelectPending = false
+    /// Set by an observed screen-lock notification and cleared only by unlock or an explicit user action.
+    private var screenLocked = false
+    /// Undocumented session state is used only as an extra reason to stay suspended.
+    var screenLockProbe: () -> Bool = { SessionLockState.screenAppearsLocked() }
     private var settingsWriteTask: Task<Void, Never>?
     lazy var monitor = CaptureMonitor(service: pasteboardService, onCapture: { [weak self] payload, source in
         self?.capture(payload, source: source)
@@ -82,7 +91,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         self.refreshClipboardAccessStatus()
         if reason == .permissionDenied { self.status = "Capture paused: clipboard access is denied in macOS. Review access in Settings." }
         else if reason == .permissionRequired { self.status = "Capture paused: clipboard access needs your choice. Request access in Settings." }
-    })
+    }, onCaptureSkipped: { [weak self] reason in self?.captureSkipped(reason) })
     init(fixtureMode: Bool = false, repository: LibraryRepository? = nil, pasteboard: NSPasteboard? = nil, performanceFixture: PerformanceFixtureSeed? = nil, fixtureRecovery: Bool = false) {
         precondition(performanceFixture == nil || (fixtureMode && pasteboard?.name.rawValue.hasPrefix("org.madeordinary.winnel.performance.") == true), "Performance data requires its isolated named pasteboard")
         precondition(!fixtureRecovery || (fixtureMode && repository == nil && pasteboard == nil && performanceFixture == nil), "Recovery testing requires its generated temporary vault and named pasteboard")
@@ -113,6 +122,10 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         return (ordered + rest).compactMap { id in state.items.first { $0.id == id } }
     }
     var accessibilityGranted: Bool { targetService.hasPermission }
+    /// Direct paste stays unavailable until an app/version has observed compatibility evidence.
+    var directPasteAvailable: Bool { !targetService.compatibilityRules.isEmpty }
+    /// Return is labeled and performed as Copy while no destination supports direct paste.
+    var effectiveDefaultAction: ItemAction { state.settings.defaultAction == .paste && directPasteAvailable ? .paste : .copy }
     var settings: Settings { state.settings }
     var isShuttingDown: Bool { shuttingDown }
     var isPaused: Bool { captureState == .paused || captureState == .suspended }
@@ -161,7 +174,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     /// A deletion, recovery, lock or shutdown revokes every pending plaintext operation.
     private func invalidateContentOperations() {
         contentGeneration += 1; queueGeneration += 1; queueDispatchPending = false
-        previewGeneration += 1; combinationGeneration += 1
+        previewGeneration += 1; combinationGeneration += 1; combinationLoading = false
         for task in contentTasks.values { task.cancel() }
         selectedIDs.removeAll(); selectionOrder.removeAll()
         queue?.cancel(); queue = nil
@@ -265,9 +278,10 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     private func refreshSearch() {
         searchTask?.cancel()
         let query = searchQuery
-        guard !lifecycleSuspended, !shuttingDown, recoveryMessage == nil else { searchResults = []; return }
+        guard !lifecycleSuspended, !shuttingDown, recoveryMessage == nil else { searchResults = []; autoSelectPending = false; return }
         guard !query.isEmpty, let repository else {
             searchResults = state.search(query)
+            autoSelectFirstIfPending()
             return
         }
         searchTask = Task {
@@ -275,9 +289,39 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
                 let result = try await repository.search(query)
                 guard !Task.isCancelled, searchQuery == query else { return }
                 searchResults = result
+                autoSelectFirstIfPending()
             }
             catch { guard !Task.isCancelled else { return }; fail(error) }
         }
+    }
+    /// A changed query or a newly opened palette has already revoked the previous selection.
+    /// Once the results for that query publish, select the first one unless the user chose.
+    private func autoSelectFirstIfPending() {
+        guard autoSelectPending else { return }
+        autoSelectPending = false
+        guard selectedIDs.isEmpty, let first = visibleItems.first else { return }
+        selectedIDs = [first.id]; selectionOrder = [first.id]
+        loadPreview(first.id)
+    }
+    /// Starts each palette session from the newest visible item. Pending selection-dependent
+    /// work from the previous session is revoked even when the query is already empty;
+    /// an established queue keeps its approved snapshot.
+    func prepareForPaletteOpen() {
+        reconcileVisibleSelection(allowedIDs: [], reset: true)
+        if searchQuery.isEmpty { autoSelectPending = true; refreshSearch() } else { searchQuery = "" }
+        paletteOpenCount += 1
+    }
+    /// Arrow keys from the search field move a single selection through the visible results.
+    func moveVisibleSelection(by offset: Int) {
+        let items = visibleItems
+        guard !items.isEmpty else { return }
+        let current = selectedItems.first.flatMap { selected in items.firstIndex { $0.id == selected.id } }
+        let index = current.map { min(max($0 + offset, 0), items.count - 1) } ?? (offset > 0 ? 0 : items.count - 1)
+        let id = items[index].id
+        guard selectedIDs != [id] else { return }
+        reconcileVisibleSelection(allowedIDs: [], reset: true)
+        selectedIDs = [id]; selectionOrder = [id]
+        loadPreview(id)
     }
     private func reconcileVisibleSelection(allowedIDs: Set<UUID>? = nil, reset: Bool = false) {
         let previousFirst = selectedItems.first?.id
@@ -285,7 +329,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         selectedIDs.formIntersection(allowedIDs ?? Set(visibleItems.map(\.id)))
         selectionOrder.removeAll { !selectedIDs.contains($0) }
         if reset || selectedIDs != previousIDs {
-            combinationGeneration += 1; combinationPreview = ""
+            combinationGeneration += 1; combinationPreview = ""; combinationLoading = false
             for kind: ContentOperationKind in [.combination, .queuePreparation, .clipboard, .exportPreparation] {
                 contentSlots[kind]?.task.cancel()
             }
@@ -298,6 +342,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     }
     func enableCapture() {
         guard recoveryMessage == nil else { status = "Resolve storage recovery before enabling capture."; return }
+        acknowledgeUserPresence()
         captureControlGeneration += 1
         let generation = captureControlGeneration
         Task {
@@ -322,6 +367,27 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             guard let repository else { return }
             do { apply(try await repository.mutate { $0.settings.pauseUntil = nil; $0.settings.capturePaused = false }); if generation == captureControlGeneration { resumeIfPermitted() } }
             catch { fail(error) }
+        }
+    }
+    /// Only explicit controls call this. Timers and notifications use resumeCapture().
+    func resumeCaptureFromUser() {
+        guard recoveryMessage == nil, state.settings.captureEnabled else { return }
+        acknowledgeUserPresence()
+        resumeCapture()
+    }
+    /// A click on a Winnel control proves an active, unlocked session, so it may clear a
+    /// suspension whose wake or unlock notification was missed.
+    private func acknowledgeUserPresence() {
+        guard lifecycleSuspended || screenLocked else { return }
+        screenLocked = false; lifecycleSuspended = false
+    }
+    func captureSkipped(_ reason: CaptureSkipReason) {
+        guard captureState == .active, recoveryMessage == nil else { return }
+        switch reason {
+        case .oversized: status = "Last copy wasn't saved: it's larger than Winnel's capture limit (\(WinnelStyle.captureLimitLabel(state.settings.captureByteLimit)))."
+        case .invalidImage: status = "Last copy wasn't saved: the image is unreadable or larger than 8192 pixels per side."
+        case .unsupported: status = "Last copy wasn't saved: Winnel keeps text, links, PNG, TIFF and JPEG images, and file references."
+        default: break
         }
     }
     private func resumeIfPermitted() {
@@ -425,7 +491,6 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     func requestAccessibility() {
         guard !fixtureRecovery else { status = "Accessibility requests are disabled in this synthetic recovery fixture."; return }
         let granted = targetService.requestPermissionFromUserAction()
-        var settings = state.settings; settings.directPasteEnabled = granted; updateSettings(settings)
         status = granted ? "Accessibility is available. Paste remains limited to validated apps." : "Accessibility has not been granted. Copy remains available."
     }
     func capturePaletteTarget() { paletteTarget = targetService.captureTarget() }
@@ -497,7 +562,38 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         if let url, !(URL(string: url)?.scheme.map { ["http", "https", "mailto"].contains($0.lowercased()) } ?? false) { status = "Use an absolute HTTP, HTTPS or mailto URL."; return }
         perform { state in guard let stack = state.stacks.first(where: { $0.id == stackID }) else { throw LibraryError.missingStack }; var members = stack.memberships; guard let index = members.firstIndex(where: { $0.itemID == itemID }) else { throw LibraryError.missingItem }; members[index].associatedURL = url; _ = try state.setMemberships(stackID, memberships: members, now: Date()) }
     }
-    func deleteEverywhere(_ id: UUID) { invalidateContentOperations(); perform({ $0.deleteEverywhere(id) }, success: "Deleted from all app locations.") }
+    func deleteEverywhere(_ id: UUID) { deleteEverywhere([id]) }
+    func deleteEverywhere(_ ids: [UUID]) {
+        guard !ids.isEmpty else { return }
+        invalidateContentOperations()
+        perform({ state in for id in ids { state.deleteEverywhere(id) } }, success: ids.count == 1 ? "Deleted from all app locations." : "Deleted \(ids.count) items from all app locations.")
+    }
+    /// Runs the real library mutation on a copy so confirmations name exactly what would be removed.
+    private func simulatedRemovals(_ change: (inout LibraryState) throws -> Set<UUID>) -> Set<UUID> {
+        var copy = state
+        return (try? change(&copy)) ?? []
+    }
+    func unpinWouldRemove(_ id: UUID) -> Bool { simulatedRemovals { try $0.setPinned(id, false, now: Date()) }.contains(id) }
+    func stackRemovalWouldRemove(stackID: UUID, itemID: UUID) -> Bool {
+        simulatedRemovals { state in
+            guard let stack = state.stacks.first(where: { $0.id == stackID }) else { return [] }
+            return try state.setMemberships(stackID, memberships: stack.memberships.filter { $0.itemID != itemID }, now: Date())
+        }.contains(itemID)
+    }
+    func itemsReleasedByDeletingStack(_ id: UUID) -> Int {
+        let members = Set(state.stacks.first { $0.id == id }?.memberships.map(\.itemID) ?? [])
+        return simulatedRemovals { $0.deleteStack(id, now: Date()) }.intersection(members).count
+    }
+    /// Mirrors the settings transaction: switching to RAM-only clears unsaved recent items first.
+    func itemsRemovedByRetention(_ retention: Retention) -> Int {
+        simulatedRemovals { state in
+            let previous = state.settings.retention
+            state.settings.retention = retention
+            var removed = previous != .ramOnly && retention == .ramOnly ? state.clearRecent() : []
+            removed.formUnion(state.enforceRetention(now: Date()))
+            return removed
+        }.count
+    }
     func clearRecent() { invalidateContentOperations(); perform({ _ = $0.clearRecent() }, success: "Recent history cleared. Saved items remain.") }
     func resetStorageAfterConfirmation() { deleteAllData() }
     func deleteAllData() {
@@ -568,7 +664,10 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         let generation = combinationGeneration
         let stack = state.stacks.first { $0.id == stackID }
         let items = selectedItems
-        runContentOperation(kind: .combination) { [self] operation in do { guard let repository else { return }; var entries: [CombinationEntry] = []; var bytes = 0
+        combinationLoading = contentOperationIsCurrent(contentGeneration) && !items.isEmpty
+        runContentOperation(kind: .combination) { [self] operation in
+            defer { if generation == combinationGeneration { combinationLoading = false } }
+            do { guard let repository else { return }; var entries: [CombinationEntry] = []; var bytes = 0
             for item in items {
                 guard contentOperationIsCurrent(operation), generation == combinationGeneration else { return }
                 bytes += item.payloadByteCount; guard bytes <= LibraryRepository.ramBudget else { status = "Combination exceeds the 64 MiB preview limit."; return }
@@ -718,8 +817,14 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             status = "Encrypted recovery files exported. The original key is still required."
         } catch { status = "Encrypted recovery export failed." } }
     }
-    func handleLifecycleSuspension() { lifecycleSuspended = true; captureControlGeneration += 1; invalidateContentOperations(); monitor.suspend() }
+    func handleLifecycleSuspension(screenLocked locked: Bool = false) {
+        if locked { screenLocked = true }
+        lifecycleSuspended = true; captureControlGeneration += 1; invalidateContentOperations(); monitor.suspend()
+    }
+    func handleScreenUnlocked() { screenLocked = false; resumeAfterWake() }
+    /// Wake and session activation never end a suspension while the screen is known to be locked.
     func resumeAfterWake() {
+        guard !screenLocked, !screenLockProbe() else { return }
         lifecycleSuspended = false
         let generation = captureControlGeneration
         Task { do { guard let repository else { return }; apply(try await repository.mutate { _ = $0.enforceRetention(now: Date()) }); if generation == captureControlGeneration { resumeIfPermitted() } } catch { fail(error) } }

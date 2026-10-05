@@ -232,6 +232,28 @@ final class PlatformTests: XCTestCase {
         restricted = policy; restricted.pixelLimit = 7
         XCTAssertFalse(restricted.permitsImage(data))
         XCTAssertNil(policy.thumbnail(data, maximumDimension: 1024))
+        XCTAssertEqual(policy.imageDescriptor(data, type: "public.png"), "PNG image · 4 × 2")
+        XCTAssertEqual(policy.imageDescriptor(Data("invalid".utf8), type: "public.jpeg"), "JPEG image")
+        XCTAssertNil(policy.imageDescriptor(data, type: "public.heic"))
+    }
+    @MainActor func testMonitorReportsOversizedCopyButKeepsConcealedCopySilent() async throws {
+        let board = NSPasteboard(name: .init("winnel-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        var policy = CapturePolicy(); policy.byteLimit = 64
+        var copies = 0; var skipped: [CaptureSkipReason] = []
+        let monitor = CaptureMonitor(service: .init(pasteboard: board, policy: policy), onCapture: { _, _ in copies += 1 }, onCaptureSkipped: { skipped.append($0) })
+        monitor.enable()
+        defer { monitor.stop() }
+        board.clearContents(); XCTAssertTrue(board.setString(String(repeating: "x", count: 200), forType: .string))
+        monitor.poll(); monitor.poll()
+        let deadline = Date().addingTimeInterval(2)
+        while skipped.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(skipped, [.oversized]); XCTAssertEqual(copies, 0)
+        let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+        board.declareTypes([.string, concealed], owner: nil); board.setString("synthetic secret", forType: .string); board.setData(Data(), forType: concealed)
+        monitor.poll(); monitor.poll()
+        try await Task.sleep(for: .milliseconds(200))
+        XCTAssertEqual(skipped, [.oversized]); XCTAssertEqual(copies, 0)
     }
     @MainActor func testModifierWaitRechecksCurrentActionAndCancellation() async throws {
         var stillCurrent = true

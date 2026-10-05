@@ -45,9 +45,13 @@ struct OnboardingView: View {
                 }
                 GroupBox("3. Optional conveniences") {
                     VStack(alignment: .leading, spacing: 12) {
-                        Toggle("Use direct paste in supported apps", isOn: $directPaste)
-                        Text("Direct paste needs Accessibility permission. Winnel validates the intended app and field before sending one paste request. Secure, terminal or uncertain targets use Copy and manual Command-V.").font(.callout).foregroundStyle(.secondary)
-                        if directPaste { Button("Open Accessibility permission request") { model.requestAccessibility() }; Text(model.accessibilityGranted ? "Accessibility is available." : "You can continue without Accessibility.").font(.callout).foregroundStyle(.secondary) }
+                        if model.directPasteAvailable {
+                            Toggle("Use direct paste in supported apps", isOn: $directPaste)
+                            Text("Direct paste needs Accessibility permission. Winnel validates the intended app and field before sending one paste request. Secure, terminal or uncertain targets use Copy and manual Command-V.").font(.callout).foregroundStyle(.secondary)
+                            if directPaste { Button("Open Accessibility permission request") { model.requestAccessibility() }; Text(model.accessibilityGranted ? "Accessibility is available." : "You can continue without Accessibility.").font(.callout).foregroundStyle(.secondary) }
+                        } else {
+                            Text("Return copies the item you choose; then press Command-V where you want it. Direct paste will appear here once an app has been verified for it, so Winnel does not ask for Accessibility permission.").font(.callout).foregroundStyle(.secondary)
+                        }
                         Divider()
                         Toggle("Launch Winnel at login", isOn: $launchAtLogin)
                         Toggle("Check for updates", isOn: $updates)

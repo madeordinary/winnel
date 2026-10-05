@@ -193,6 +193,7 @@ extension AppModelTests {
         let item = try XCTUnwrap(snapshot.state.items.first)
         let model = AppModel(fixtureMode: true, repository: repo, pasteboard: NSPasteboard(name: .init("org.madeordinary.winnel.controller-test." + UUID().uuidString)))
         model.state = snapshot.state; model.selectedIDs = [item.id]; model.selectionOrder = [item.id]
+        model.screenLockProbe = { false }
         return (model, repo, item)
     }
     @MainActor func testDeleteAllRevokesPendingQueueAndPlaintextCaches() async throws {
@@ -632,7 +633,9 @@ extension AppModelTests {
         XCTAssertTrue(model.selectedIDs.isEmpty); XCTAssertTrue(model.selectionOrder.isEmpty)
         XCTAssertNil(model.previewPayload)
         try await settle { model.visibleItems.contains { $0.id == item.id } }
-        XCTAssertTrue(model.selectedIDs.isEmpty)
+        // The fresh selection is the first authoritative match, chosen only after results publish.
+        try await settle { model.selectedIDs == [item.id] }
+        XCTAssertEqual(model.selectionOrder, [item.id])
         model.selectedIDs = [item.id]; model.selectionOrder = [item.id]
         model.loadPreview(item.id); await model.waitForContentOperations()
         model.searchQuery = "tailneedle"
@@ -685,4 +688,158 @@ extension AppModelTests {
         await model.shutdown()
     }
 
+}
+
+extension AppModelTests {
+    @MainActor private func addTextItem(_ text: String, to model: AppModel, repo: LibraryRepository, copiedAt: Date = Date()) async throws -> ClipboardItem {
+        let payload = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data(text.utf8))])
+        let snapshot = try await repo.ingest(payload, source: .init(), now: copiedAt, sessionIDs: [])
+        model.state = snapshot.state
+        return try XCTUnwrap(snapshot.state.items.first { $0.fingerprint == payload.fingerprint })
+    }
+
+    @MainActor func testChangedQueryKeepsSelectionTheUserChoseBeforeResultsArrive() async throws {
+        let (model, repo, first) = try await controlledModel()
+        let second = try await addTextItem("synthetic second entry", to: model, repo: repo)
+        model.searchQuery = "synthetic"
+        XCTAssertTrue(model.selectedIDs.isEmpty)
+        // The user picks a row before the payload search publishes.
+        model.selectedIDs = [first.id]; model.selectionOrder = [first.id]
+        try await settle { model.visibleItems.count == 2 }
+        XCTAssertEqual(model.selectedIDs, [first.id])
+        model.searchQuery = "second entry"
+        try await settle { model.selectedIDs == [second.id] }
+        await model.waitForContentOperations()
+        await model.shutdown()
+    }
+
+    @MainActor func testPaletteOpenRevokesPendingCopyAndSelectsNewestWithEmptyQuery() async throws {
+        let gate = OperationBarrier()
+        let (model, repo, first) = try await controlledModel(payloadGate: gate)
+        let newest = try await addTextItem("synthetic newest entry", to: model, repo: repo, copiedAt: Date().addingTimeInterval(5))
+        model.selectedIDs = [first.id]; model.selectionOrder = [first.id]
+        let payload = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data("synthetic queue".utf8))])
+        model.queue = .init(entries: [.init(item: first, payload: payload)], now: Date())
+        let count = model.pasteboardService.changeCount
+        XCTAssertTrue(model.searchQuery.isEmpty)
+        await gate.arm(); model.copySelected(); await gate.waitUntilEntered()
+        let opened = model.paletteOpenCount
+        model.prepareForPaletteOpen()
+        XCTAssertEqual(model.selectedIDs, [newest.id]); XCTAssertEqual(model.selectionOrder, [newest.id])
+        XCTAssertEqual(model.paletteOpenCount, opened + 1)
+        await gate.release(); await model.waitForContentOperations()
+        XCTAssertEqual(model.pasteboardService.changeCount, count, "The previous session's pending copy must not publish")
+        XCTAssertEqual(model.queue?.entries.first?.item.id, first.id)
+        model.searchQuery = "protected"
+        try await settle { model.selectedIDs == [first.id] }
+        model.prepareForPaletteOpen()
+        XCTAssertTrue(model.searchQuery.isEmpty)
+        XCTAssertEqual(model.selectedIDs, [newest.id])
+        await model.waitForContentOperations()
+        await model.shutdown()
+    }
+
+    @MainActor func testArrowSelectionMovesWithinVisibleResultsAndStopsAtEnds() async throws {
+        let (model, repo, first) = try await controlledModel()
+        let newest = try await addTextItem("synthetic newer entry", to: model, repo: repo, copiedAt: Date().addingTimeInterval(5))
+        model.selectedIDs = []; model.selectionOrder = []
+        XCTAssertEqual(model.visibleItems.map(\.id), [newest.id, first.id])
+        model.moveVisibleSelection(by: 1); XCTAssertEqual(model.selectedIDs, [newest.id])
+        model.moveVisibleSelection(by: 1); XCTAssertEqual(model.selectedIDs, [first.id]); XCTAssertEqual(model.selectionOrder, [first.id])
+        model.moveVisibleSelection(by: 1); XCTAssertEqual(model.selectedIDs, [first.id])
+        model.moveVisibleSelection(by: -1); XCTAssertEqual(model.selectedIDs, [newest.id])
+        model.moveVisibleSelection(by: -1); XCTAssertEqual(model.selectedIDs, [newest.id])
+        await model.waitForContentOperations()
+        await model.shutdown()
+    }
+
+    @MainActor func testWakeWhileLockedWaitsForUnlockAndOnlyUserResumeEndsMissedSuspension() async throws {
+        let (model, _, _) = try await controlledModel()
+        model.enableCapture(); try await settle { model.captureState == .active }
+        model.handleLifecycleSuspension(screenLocked: true)
+        model.resumeAfterWake()
+        XCTAssertEqual(model.captureState, .suspended, "Waking to the lock screen must not resume capture")
+        model.resumeCapture()
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(model.captureState, .suspended, "Automatic resume (timed pause expiry) must not end a lock suspension")
+        model.handleScreenUnlocked(); try await settle { model.captureState == .active }
+        // A sleep whose wake notification is missed stays suspended until the user acts.
+        model.handleLifecycleSuspension()
+        model.screenLockProbe = { true }
+        model.resumeAfterWake()
+        XCTAssertEqual(model.captureState, .suspended, "A locked session state keeps capture suspended")
+        model.resumeCaptureFromUser(); try await settle { model.captureState == .active }
+        await model.shutdown()
+    }
+
+    @MainActor func testMultiDeleteRemovesEverySelectedItem() async throws {
+        let (model, repo, first) = try await controlledModel()
+        try await addSecondSelection(model, repo: repo, first: first)
+        let ids = model.selectedItems.map(\.id)
+        XCTAssertEqual(ids.count, 2)
+        model.deleteEverywhere(ids)
+        XCTAssertTrue(model.selectedIDs.isEmpty)
+        try await settle { model.state.items.isEmpty }
+        XCTAssertEqual(model.status, "Deleted 2 items from all app locations.")
+        await model.shutdown()
+    }
+
+    @MainActor func testRemovalPreviewsMatchTheRealLibraryMutations() async throws {
+        let (model, repo, recent) = try await controlledModel()
+        // Older than the default 24-hour recent window.
+        let old = try await addTextItem("synthetic two-day-old entry", to: model, repo: repo, copiedAt: Date().addingTimeInterval(-172_800))
+        var state = model.state
+        _ = try state.setPinned(old.id, true, now: Date()); _ = try state.setPinned(recent.id, true, now: Date())
+        let stackID = try state.createStack(name: "synthetic stack", itemIDs: [old.id])
+        model.state = state
+        XCTAssertFalse(model.unpinWouldRemove(recent.id))
+        XCTAssertFalse(model.unpinWouldRemove(old.id), "The stack still holds the old item")
+        XCTAssertFalse(model.stackRemovalWouldRemove(stackID: stackID, itemID: old.id), "The pin still holds the old item")
+        _ = try state.setPinned(old.id, false, now: Date()); model.state = state
+        XCTAssertTrue(model.stackRemovalWouldRemove(stackID: stackID, itemID: old.id))
+        XCTAssertEqual(model.itemsReleasedByDeletingStack(stackID), 1)
+        _ = try state.setPinned(old.id, true, now: Date()); _ = state.deleteStack(stackID, now: Date()); model.state = state
+        XCTAssertTrue(model.unpinWouldRemove(old.id))
+        _ = try state.setPinned(recent.id, false, now: Date()); model.state = state
+        XCTAssertEqual(model.itemsRemovedByRetention(.sevenDays), 0)
+        XCTAssertEqual(model.itemsRemovedByRetention(.ramOnly), 1, "RAM-only clears unsaved recent items")
+        XCTAssertEqual(model.state.items.count, 2, "Previews never change the published state")
+        await model.shutdown()
+    }
+
+    @MainActor func testSkippedCopyReasonsAreReportedOnlyWhileCapturing() async throws {
+        let (model, _, _) = try await controlledModel()
+        let initial = model.status
+        model.captureSkipped(.oversized)
+        XCTAssertEqual(model.status, initial, "Nothing is reported while capture is off")
+        model.enableCapture(); try await settle { model.captureState == .active }
+        model.captureSkipped(.marker)
+        XCTAssertFalse(model.status.hasPrefix("Last copy wasn't saved"), "Concealed and transient copies stay silent")
+        model.captureSkipped(.oversized)
+        XCTAssertEqual(model.status, "Last copy wasn't saved: it's larger than Winnel's capture limit (about 15 MB).")
+        model.captureSkipped(.unsupported)
+        XCTAssertTrue(model.status.hasPrefix("Last copy wasn't saved: Winnel keeps text"))
+        await model.shutdown()
+    }
+
+    @MainActor func testReturnCopiesUntilAnAppIsVerifiedForDirectPaste() async throws {
+        let (model, _, _) = try await controlledModel()
+        model.state.settings.defaultAction = .paste
+        XCTAssertFalse(model.directPasteAvailable)
+        XCTAssertEqual(model.effectiveDefaultAction, .copy)
+        model.targetService.compatibilityRules = [.init(bundleIdentifier: "synthetic.editor", role: "AXTextArea", testedAppVersion: "1", testedAppBuild: "1")]
+        XCTAssertTrue(model.directPasteAvailable)
+        XCTAssertEqual(model.effectiveDefaultAction, .paste)
+        await model.shutdown()
+    }
+
+    @MainActor func testImageItemsAreNamedByFormatAndSize() async throws {
+        let (model, repo, _) = try await controlledModel()
+        let image = try await addImageSelection(model, repo: repo)
+        XCTAssertEqual(image.textPreview, "PNG image · 640 × 320")
+        let invalidPayload = ClipPayload(representations: [.init(type: "public.png", data: Data("synthetic invalid image".utf8))])
+        let snapshot = try await repo.ingest(invalidPayload, source: .init(), now: Date(), sessionIDs: [])
+        XCTAssertEqual(snapshot.state.items.first { $0.fingerprint == invalidPayload.fingerprint }?.textPreview, "PNG image")
+        await model.shutdown()
+    }
 }

@@ -1,5 +1,6 @@
 import Foundation
 import WinnelCore
+import WinnelPlatform
 import WinnelStorage
 
 struct RepositorySnapshot: Sendable {
@@ -135,7 +136,8 @@ actor LibraryRepository {
         guard encoded.count <= state.settings.captureByteLimit else { throw LibraryError.captureTooLarge }
         let kind: ClipKind = !payload.fileReferences.isEmpty ? .files : payload.representations.contains(where: { $0.type == "public.url" }) ? .url : payload.representations.contains(where: { ["public.png", "public.tiff", "public.jpeg"].contains($0.type) }) ? .image : payload.representations.contains(where: { $0.type == "public.rtf" }) ? .richText : .text
         let text = payload.plainText ?? payload.fileReferences.map(\.displayName).joined(separator: ", ")
-        let preview = kind == .image ? "Image" : text
+        let image = kind == .image ? payload.representations.first { ["public.png", "public.tiff", "public.jpeg"].contains($0.type) } : nil
+        let preview = image.map { CapturePolicy().imageDescriptor($0.data, type: $0.type) ?? "Image" } ?? text
         let item = ClipboardItem(copiedAt: now, source: source, kind: kind, textPreview: preview, searchText: text, payloadByteCount: encoded.count, fingerprint: payload.fingerprint)
         var candidate = state
         let ingestion = try candidate.ingest(item, now: now, sessionRetainedIDs: sessionIDs)

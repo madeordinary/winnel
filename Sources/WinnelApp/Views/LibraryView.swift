@@ -10,6 +10,8 @@ struct LibraryView: View {
     @State private var associate = false
     @State private var confirmDeleteStack = false
     @State private var confirmDeleteItem = false
+    @State private var confirmUnpin = false
+    @State private var confirmRemoveMember = false
     @State private var combine = false
     @State private var export = false
     @State private var presentation: MemberPresentation
@@ -68,37 +70,20 @@ struct LibraryView: View {
             if let stack {
                 GeometryReader { geometry in
                     VStack(alignment: .leading, spacing: 0) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Text(stack.name).font(.title3.weight(.semibold)).lineLimit(2)
-                                Text("\(stack.memberships.count) items").font(.caption).foregroundStyle(.secondary)
-                                Spacer()
-                                Picker("View", selection: $presentation) {
-                                    ForEach(MemberPresentation.allCases, id: \.self) { Text($0.rawValue).tag($0) }
-                                }.pickerStyle(.segmented).frame(width: 125)
-                                Toggle(isOn: $inspectorVisible) { Image(systemName: "sidebar.right") }
-                                    .toggleStyle(.button).help("Show or hide item inspector")
-                                    .accessibilityLabel("Item inspector")
-                            }
-                            HStack(spacing: 10) {
-                                Button { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true } label: {
-                                    Label("Combine…", systemImage: "text.badge.plus")
-                                }.disabled(!stackCanCombine)
-                                Button { selectWholeStack(); export = true } label: {
-                                    Label("Export…", systemImage: "square.and.arrow.up")
-                                }.disabled(stack.memberships.isEmpty)
-                                Spacer()
-                                Menu("Stack actions") {
-                                    Button("Rename…") { rename = true }
-                                    Divider()
-                                    Button("Delete stack…", role: .destructive) { confirmDeleteStack = true }
-                                }.fixedSize()
+                        VStack(alignment: .leading, spacing: 8) {
+                            // One row when it fits; the controls wrap below the title in narrow windows.
+                            ViewThatFits(in: .horizontal) {
+                                HStack(spacing: 10) { stackTitle(stack); Spacer(minLength: 8); stackActions(stack); presentationControls }
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack { stackTitle(stack); Spacer(minLength: 8); presentationControls }
+                                    HStack(spacing: 10) { stackActions(stack); Spacer(minLength: 0) }
+                                }
                             }
                             if !stack.memberships.isEmpty && !stackCanCombine {
                                 Text("Combine supports text and links. This stack includes an unsupported item; you can still export the stack.")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
-                        }.padding(16).background(WinnelStyle.surface)
+                        }.padding(.horizontal, 16).padding(.vertical, 10).background(WinnelStyle.surface)
                         Divider()
                         if stack.memberships.isEmpty { EmptyLibraryView(title: "Ready to collect", description: "Select clipboard items in the palette, then choose Add to stack. An item can belong to several stacks.", symbol: "square.stack") }
                         else {
@@ -112,13 +97,21 @@ struct LibraryView: View {
                                 }
                             }
                         }
+                        if model.queue != nil { Divider(); QueueStatusView(model: model).padding(12).background(WinnelStyle.accent.opacity(0.05)) }
                     }.frame(width: geometry.size.width, height: geometry.size.height, alignment: .topLeading)
                 }
-            } else { EmptyLibraryView(title: "Gather what belongs together", description: "Make a named stack of excerpts, links, images or file references. Items are shared, so removing one membership leaves other stacks intact.", symbol: "square.stack.3d.up") }
+            } else if model.state.stacks.isEmpty { EmptyLibraryView(title: "Gather what belongs together", description: "Make a named stack of excerpts, links, images or file references. Items are shared, so removing one membership leaves other stacks intact.", symbol: "square.stack.3d.up") }
+            else { EmptyLibraryView(title: "Choose a stack", description: "Select a saved stack on the left to see its items in order.", symbol: "sidebar.left") }
         }
         .background(WinnelStyle.canvas)
         .frame(minWidth: 900, minHeight: 500).tint(WinnelStyle.accent)
-        .onChange(of: memberID) { _, id in if let item = model.state.items.first(where: { $0.id == id }) { model.selectedIDs = [item.id]; model.selectionOrder = [item.id]; model.loadPreview(item.id) } }
+        .onAppear { if stackID == nil { stackID = model.state.stacks.first?.id } }
+        .onChange(of: model.state.stacks.map(\.id)) { _, ids in if stackID.map({ !ids.contains($0) }) ?? true { stackID = ids.first } }
+        .onChange(of: memberID) { _, id in
+            guard let item = model.state.items.first(where: { $0.id == id }) else { return }
+            model.selectedIDs = [item.id]; model.selectionOrder = [item.id]; model.loadPreview(item.id)
+            inspectorVisible = true
+        }
         .onChange(of: model.selectedIDs) { _, ids in
             if let memberID, ids != [memberID] { self.memberID = nil }
         }
@@ -128,7 +121,12 @@ struct LibraryView: View {
         .sheet(isPresented: $associate) { AssociationSheet(model: model, stackID: stackID, itemID: memberID) }
         .sheet(isPresented: $combine) { CombinationSheet(model: model, stackID: stackID) }
         .sheet(isPresented: $export) { ExportOptionsSheet(model: model, stackID: stackID) }
-        .alert("Delete this stack?", isPresented: $confirmDeleteStack) { Button("Cancel", role: .cancel) {}; Button("Delete stack", role: .destructive) { if let id = stackID { model.deleteStack(id) }; stackID = nil } } message: { Text("Only this stack is removed. Pins, other stack memberships and eligible recent items remain. Items past retention with no remaining saved reference are released.") }
+        .alert("Delete this stack?", isPresented: $confirmDeleteStack) { Button("Cancel", role: .cancel) {}; Button("Delete stack", role: .destructive) { if let id = stackID { model.deleteStack(id) }; stackID = nil } } message: {
+            let released = stackID.map(model.itemsReleasedByDeletingStack) ?? 0
+            Text("Only this stack is removed. Pins, other stack memberships and eligible recent items remain." + (released > 0 ? " \(released) \(released == 1 ? "item is" : "items are") past recent retention with no other saved reference and will be removed." : ""))
+        }
+        .alert("Unpin and remove this item?", isPresented: $confirmUnpin) { Button("Cancel", role: .cancel) {}; Button("Unpin and remove", role: .destructive) { if let id = memberID { model.togglePin(id) } } } message: { Text("It is older than your recent-history window and has no other saved reference, so unpinning removes it from Winnel.") }
+        .alert("Remove from stack and delete?", isPresented: $confirmRemoveMember) { Button("Cancel", role: .cancel) {}; Button("Remove", role: .destructive) { removeSelectedMember() } } message: { Text("This is the item's last saved reference and it is older than your recent-history window, so it will be removed from Winnel.") }
         .alert("Delete this item everywhere?", isPresented: $confirmDeleteItem) { Button("Cancel", role: .cancel) {}; Button("Delete everywhere", role: .destructive) { if let id = memberID { model.deleteEverywhere(id) }; memberID = nil } } message: { Text("Remove from recent history, pins and all affected stacks: \(memberID.map { model.state.affectedStacks(for: $0).map(\.name).joined(separator: ", ") } ?? ""). Original files and exports remain.") }
     }
     private func memberCards(_ stack: SavedStack) -> some View {
@@ -176,7 +174,7 @@ struct LibraryView: View {
                 }
             }.padding(16)
         }.accessibilityLabel("Ordered stack cards")
-            .accessibilityHint("Use Tab to reach cards and actions; use List for arrow-key navigation.")
+            .accessibilityHint("Select a card to open it in the inspector. Switch to List for arrow-key navigation.")
             .onAppear { if let memberID { proxy.scrollTo(memberID, anchor: .center) } }
             .onChange(of: memberID) { _, id in if let id { proxy.scrollTo(id, anchor: .center) } }
             .onChange(of: inspectorVisible) { _, _ in if let memberID { proxy.scrollTo(memberID, anchor: .center) } }
@@ -226,7 +224,7 @@ struct LibraryView: View {
                     HStack {
                         Button { model.copySelected() } label: { Label("Copy", systemImage: "doc.on.doc") }
                             .buttonStyle(.borderedProminent)
-                        Button(item.isPinned ? "Unpin" : "Pin") { model.togglePin(item.id) }
+                        Button(item.isPinned ? "Unpin" : "Pin") { if item.isPinned && model.unpinWouldRemove(item.id) { confirmUnpin = true } else { model.togglePin(item.id) } }
                         Spacer()
                     }
                     WinnelCard {
@@ -247,13 +245,40 @@ struct LibraryView: View {
                     Divider()
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Manage membership").font(.headline)
-                        Button("Remove from this stack") { if let id = stackID { model.removeFromStack(id, itemID: item.id) }; memberID = nil }
+                        Button("Remove from this stack") { if let id = stackID, model.stackRemovalWouldRemove(stackID: id, itemID: item.id) { confirmRemoveMember = true } else { removeSelectedMember() } }
                         Text("Other stack memberships and pins remain.").font(.caption).foregroundStyle(.secondary)
                         Button("Delete everywhere…", role: .destructive) { confirmDeleteItem = true }
                     }
                 }.padding(20)
             }
         } else { EmptyLibraryView(title: "Inspect a saved item", description: "Select an item to copy it, pin it or associate a URL.", symbol: "doc.text.magnifyingglass") }
+    }
+    private func removeSelectedMember() { if let id = stackID, let itemID = memberID { model.removeFromStack(id, itemID: itemID) }; memberID = nil }
+    private func stackTitle(_ stack: SavedStack) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(stack.name).font(.title3.weight(.semibold)).lineLimit(1)
+            Text("\(stack.memberships.count) \(stack.memberships.count == 1 ? "item" : "items")").font(.caption).foregroundStyle(.secondary).fixedSize()
+        }
+    }
+    private func stackActions(_ stack: SavedStack) -> some View {
+        HStack(spacing: 8) {
+            Button { selectWholeStack(); model.prepareCombination(format: .newline, stackID: stack.id); combine = true } label: { Label("Combine…", systemImage: "text.badge.plus") }
+                .disabled(!stackCanCombine)
+            Button { selectWholeStack(); export = true } label: { Label("Export…", systemImage: "square.and.arrow.up") }
+                .disabled(stack.memberships.isEmpty)
+            Button { selectWholeStack(); model.startQueue(mode: .copy) } label: { Label("Start Queue", systemImage: "list.number") }
+                .disabled(stack.memberships.isEmpty).help("Copy this stack's items one at a time with the Next shortcut")
+            Menu { Button("Rename…") { rename = true }; Divider(); Button("Delete stack…", role: .destructive) { confirmDeleteStack = true } } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Stack actions")
+        }.fixedSize()
+    }
+    private var presentationControls: some View {
+        HStack(spacing: 8) {
+            Picker("View", selection: $presentation) { ForEach(MemberPresentation.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 110)
+            Toggle(isOn: $inspectorVisible) { Image(systemName: "sidebar.right") }
+                .toggleStyle(.button).help("Show or hide item inspector").accessibilityLabel("Item inspector")
+        }.fixedSize()
     }
     private func selectWholeStack() { let ids = stack?.memberships.map(\.itemID) ?? []; model.selectedIDs = Set(ids); model.selectionOrder = ids }
     private func move(stackID: UUID, itemID: UUID, by offset: Int) {

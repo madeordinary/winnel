@@ -29,6 +29,16 @@ public struct CapturePolicy: Sendable {
               width > 0, height > 0, width <= dimensionLimit, height <= dimensionLimit else { return false }
         return width <= pixelLimit / height
     }
+    /// Reads only the image header to name an admitted image, e.g. "PNG image · 1200 × 800".
+    public func imageDescriptor(_ data: Data, type: String) -> String? {
+        let format: String
+        switch type { case "public.png": format = "PNG"; case "public.tiff": format = "TIFF"; case "public.jpeg": format = "JPEG"; default: return nil }
+        guard let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+              let width = properties[kCGImagePropertyPixelWidth] as? Int,
+              let height = properties[kCGImagePropertyPixelHeight] as? Int, width > 0, height > 0 else { return "\(format) image" }
+        return "\(format) image · \(width) × \(height)"
+    }
     /// A conservative lexical allowlist gates Apple's RTF reader. External/resource
     /// destinations, binary data and embedded objects are excluded before parsing.
     /// The platform parser supplies text fidelity; this gate does not interpret RTF text.

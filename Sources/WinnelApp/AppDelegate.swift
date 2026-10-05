@@ -24,10 +24,13 @@ final class PalettePanel: NSPanel {
     init(fixtureMode: Bool, fixtureRecovery: Bool = false) { model = AppModel(fixtureMode: fixtureMode || fixtureRecovery, fixtureRecovery: fixtureRecovery); super.init() }
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        NSApp.mainMenu = makeMainMenu()
         model.onDismissPalette = { [weak self] in self?.dismissPalette() }
         model.onDismissOnboarding = { [weak self] in self?.onboarding?.orderOut(nil); self?.showPalette() }
         model.onTestShortcuts = { [weak self] in self?.showPalette() }
-        model.$captureState.sink { [weak self] _ in self?.refreshMenu() }.store(in: &subscriptions)
+        // @Published emits before the new value is stored; refresh on the next main-queue turn.
+        model.$captureState.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.refreshMenu() }.store(in: &subscriptions)
+        model.$queue.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.refreshMenu() }.store(in: &subscriptions)
         model.$recoveryMessage.sink { [weak self] message in
             guard let self else { return }
             if message == nil {
@@ -54,8 +57,7 @@ final class PalettePanel: NSPanel {
         shortcuts.onNext = { [weak self] in self?.model.nextInQueue() }
         configureShortcuts()
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(systemSymbolName: "square.stack.3d.up", accessibilityDescription: "Winnel")
-        item.button?.toolTip = "Winnel clipboard history"
+        item.button?.imagePosition = .imageLeading
         statusItem = item; refreshMenu()
         model.onSettingsChanged = { [weak self] _ in self?.configureShortcuts(); self?.refreshMenu() }
         setupLifecycle()
@@ -63,10 +65,12 @@ final class PalettePanel: NSPanel {
         localKeys = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             let keyCode = event.keyCode
             let handled = MainActor.assumeIsolated {
-                if keyCode == 53 {
-                    self?.model.cancelQueue()
-                    if self?.panel?.isKeyWindow == true, self?.panel?.attachedSheet == nil { self?.dismissPalette(); return true }
-                }
+                guard keyCode == 53, let self else { return false }
+                // Escape cancels the queue only from a surface that shows it; sheets and
+                // Settings keep their own Escape behavior.
+                let key = NSApp.keyWindow
+                if let key, key === self.panel || key === self.library, key.attachedSheet == nil { self.model.cancelQueue() }
+                if self.panel?.isKeyWindow == true, self.panel?.attachedSheet == nil { self.dismissPalette(); return true }
                 return false
             }
             return handled ? nil : event
@@ -78,6 +82,26 @@ final class PalettePanel: NSPanel {
             configureShortcuts(); refreshMenu()
         }
     }
+    /// The menu bar stays hidden for this accessory app, but text fields rely on these
+    /// key equivalents for standard editing. Quit remains in the status menu only.
+    private func makeMainMenu() -> NSMenu {
+        let main = NSMenu()
+        func submenu(_ title: String, _ items: [NSMenuItem]) {
+            let menu = NSMenu(title: title); items.forEach(menu.addItem)
+            let item = NSMenuItem(title: title, action: nil, keyEquivalent: ""); item.submenu = menu; main.addItem(item)
+        }
+        func item(_ title: String, _ action: Selector, _ key: String, _ modifiers: NSEvent.ModifierFlags = .command, target: AnyObject? = nil) -> NSMenuItem {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.keyEquivalentModifierMask = modifiers; item.target = target; return item
+        }
+        submenu("Winnel", [item("Settings…", #selector(openSettings), ",", target: self)])
+        submenu("Edit", [
+            item("Undo", Selector(("undo:")), "z"), item("Redo", Selector(("redo:")), "z", [.command, .shift]), .separator(),
+            item("Cut", #selector(NSText.cut(_:)), "x"), item("Copy", #selector(NSText.copy(_:)), "c"),
+            item("Paste", #selector(NSText.paste(_:)), "v"), item("Select All", #selector(NSText.selectAll(_:)), "a"),
+        ])
+        submenu("Window", [item("Close", #selector(NSWindow.performClose(_:)), "w")])
+        return main
+    }
     private func configureShortcuts() {
         let configuration = model.state.settings
         let palette = ShortcutSpec(keyCode: configuration.paletteShortcutKeyCode, modifiers: configuration.paletteShortcutModifiers)
@@ -86,23 +110,45 @@ final class PalettePanel: NSPanel {
     }
     func refreshMenu() {
         let menu = NSMenu()
+        let state = model.captureState
+        if let queue = model.queue {
+            let count = queue.entries.count, position = min(queue.position + 1, count)
+            let next = ShortcutSpec(keyCode: model.state.settings.nextShortcutKeyCode, modifiers: model.state.settings.nextShortcutModifiers).displayName
+            info(queue.isComplete ? "Queue complete: \(count) items sent" : "Queue \(position) of \(count): " + WinnelStyle.displayText(String((queue.current?.item.textPreview ?? "").prefix(40))), to: menu)
+            add(queue.mode == .copy ? "Copy Next Item (\(next))" : "Paste Next Item (\(next))", action: #selector(queueNext), to: menu).isEnabled = queue.current != nil
+            add("Back", action: #selector(queueBack), to: menu).isEnabled = queue.position > 0
+            add("Cancel Queue", action: #selector(queueCancel), to: menu)
+            menu.addItem(.separator())
+        }
         add("Open Winnel", action: #selector(openPalette), to: menu)
         add("Saved Stacks", action: #selector(openLibrary), to: menu)
         menu.addItem(.separator())
-        add(model.captureState == .active ? "Pause Capture" : "Resume Capture", action: #selector(toggleCapture), to: menu)
+        info(state.label, to: menu)
+        if !model.state.settings.captureEnabled { add("Turn On Capture", action: #selector(toggleCapture), to: menu) }
+        else { add(state == .active ? "Pause Capture" : "Resume Capture", action: #selector(toggleCapture), to: menu) }
         add("Settings…", action: #selector(openSettings), to: menu)
         menu.addItem(.separator()); add("Quit Winnel", action: #selector(quit), to: menu)
         statusItem?.menu = menu
+        // The symbol is slashed whenever new copies are not being recorded.
+        let symbol = state == .active ? "square.stack.3d.up" : "square.stack.3d.up.slash"
+        statusItem?.button?.image = NSImage(systemSymbolName: symbol, accessibilityDescription: "Winnel, " + state.label)
+        statusItem?.button?.title = model.queue.map { $0.isComplete ? " ✓" : " \(min($0.position + 1, $0.entries.count))/\($0.entries.count)" } ?? ""
+        statusItem?.button?.toolTip = "Winnel clipboard history — " + state.label
     }
-    private func add(_ title: String, action: Selector, to menu: NSMenu) { let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; menu.addItem(item) }
+    @discardableResult private func add(_ title: String, action: Selector, to menu: NSMenu) -> NSMenuItem { let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; menu.addItem(item); return item }
+    private func info(_ title: String, to menu: NSMenu) { let item = NSMenuItem(title: title, action: nil, keyEquivalent: ""); item.isEnabled = false; menu.addItem(item) }
+    @objc private func queueNext() { model.nextInQueue() }
+    @objc private func queueBack() { model.backInQueue() }
+    @objc private func queueCancel() { model.cancelQueue() }
     @objc private func openPalette() { showPalette() }
     @objc private func openLibrary() { showLibrary() }
     @objc private func openSettings() { showSettings() }
-    @objc private func toggleCapture() { if model.captureState == .active { model.pause(until: nil) } else if !model.state.settings.captureEnabled { model.enableCapture() } else { model.resumeCapture() }; refreshMenu() }
+    @objc private func toggleCapture() { if !model.state.settings.captureEnabled { model.enableCapture() } else if model.captureState == .active { model.pause(until: nil) } else { model.resumeCaptureFromUser() } }
     @objc private func quit() { NSApp.terminate(nil) }
     func showPalette() {
         guard NSApp.modalWindow == nil else { return }
         model.capturePaletteTarget()
+        model.prepareForPaletteOpen()
         if panel == nil {
             let storedSize = UserDefaults.standard.string(forKey: "paletteSize").map(NSSizeFromString) ?? NSSize(width: 760, height: 600)
             let size = NSSize(width: max(620, min(storedSize.width, 1000)), height: max(420, min(storedSize.height, 900)))
@@ -131,8 +177,8 @@ final class PalettePanel: NSPanel {
         for name in [NSWorkspace.didWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
             observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.model.resumeAfterWake(); self?.refreshMenu() } })
         }
-        observers.append(DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.model.handleLifecycleSuspension(); self?.dismissPalette() } })
-        observers.append(DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.model.resumeAfterWake(); self?.refreshMenu() } })
+        observers.append(DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.model.handleLifecycleSuspension(screenLocked: true); self?.dismissPalette() } })
+        observers.append(DistributedNotificationCenter.default().addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.model.handleScreenUnlocked(); self?.refreshMenu() } })
     }
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         guard !quitting else { return .terminateNow }; quitting = true; shortcuts.unregister()

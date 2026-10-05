@@ -1,5 +1,6 @@
 import SwiftUI
 import WinnelCore
+import WinnelPlatform
 
 /// Native adaptive surfaces keep system contrast, text scaling and VoiceOver behavior.
 enum WinnelStyle {
@@ -16,6 +17,16 @@ enum WinnelStyle {
             else { result.unicodeScalars.append(scalar) }
         }
         return result
+    }
+    /// Storage sizes use binary units so the 20 MB and 2 GB budgets read as configured.
+    static func bytes(_ count: Int) -> String { ByteCountFormatter.string(fromByteCount: Int64(count), countStyle: .binary) }
+    /// The capture limit measures the encoded copy; Base64 encoding makes the original data about three quarters of it.
+    static func captureLimitLabel(_ serializedLimit: Int) -> String { "about " + bytes(serializedLimit / 4 * 3) }
+    /// A coarse, static age keeps rows calm; the inspector shows the exact copy time.
+    static func age(_ date: Date, now: Date = Date()) -> String {
+        guard now.timeIntervalSince(date) >= 60 else { return "Just now" }
+        let formatter = RelativeDateTimeFormatter(); formatter.unitsStyle = .abbreviated
+        return formatter.localizedString(for: date, relativeTo: now)
     }
     static let accent = Color(nsColor: NSColor(name: "WinnelAccent") { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -56,11 +67,25 @@ struct WinnelCard<Content: View>: View {
 
 struct ClipTypeBadge: View {
     let kind: ClipKind
+    /// Rows rely on the badge to name the type; headers that print the type keep it hidden.
+    var announcesKind = false
     var body: some View {
         Image(systemName: kind.symbol).font(.system(size: 18, weight: .medium))
             .foregroundStyle(.secondary).frame(width: 32, height: 32)
             .background(WinnelStyle.canvas, in: RoundedRectangle(cornerRadius: 8))
-            .accessibilityHidden(true)
+            .accessibilityLabel(kind.label).accessibilityHidden(!announcesKind)
+    }
+}
+
+extension CaptureState {
+    /// One wording for capture state across the palette, Settings and the menu bar.
+    var label: String {
+        switch self {
+        case .active: "Capture on"
+        case .disabled: "Capture off"
+        case .paused: "Capture paused"
+        case .suspended: "Paused while locked or asleep"
+        }
     }
 }
 
@@ -85,23 +110,23 @@ struct ItemRow: View {
     var isSelected = false
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            ClipTypeBadge(kind: item.kind)
-            VStack(alignment: .leading, spacing: 5) {
+            ClipTypeBadge(kind: item.kind, announcesKind: true)
+            VStack(alignment: .leading, spacing: 3) {
                 Text(highlighted(WinnelStyle.displayText(item.textPreview.isEmpty ? item.kind.label : item.textPreview)))
                     .font(.body.weight(.medium)).lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 7) {
                     Text(sourceLabel).font(.caption).lineLimit(1)
                     Spacer(minLength: 2)
-                    Text(item.copiedAt, style: .relative).font(.caption).lineLimit(1)
+                    Text(WinnelStyle.age(item.copiedAt)).font(.caption).lineLimit(1)
                     if item.isPinned { Image(systemName: "pin.fill").font(.caption).accessibilityLabel("Pinned") }
                 }.foregroundStyle(.secondary)
-                Text(item.kind.label).font(.caption2).foregroundStyle(.secondary)
             }
         }
-        .padding(10)
-        .background(isSelected ? WinnelStyle.accent.opacity(0.08) : WinnelStyle.surface, in: RoundedRectangle(cornerRadius: 9))
-        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(isSelected ? WinnelStyle.accent : WinnelStyle.border, lineWidth: isSelected ? 1.5 : 0.5))
-        .padding(.vertical, 2)
+        .padding(8)
+        // The native list highlight is the only selection style; the card steps aside for it.
+        .background(isSelected ? Color.clear : WinnelStyle.surface, in: RoundedRectangle(cornerRadius: 9))
+        .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(isSelected ? Color.clear : WinnelStyle.border, lineWidth: 0.5))
+        .padding(.vertical, 1)
         .accessibilityElement(children: .combine)
     }
     private var sourceLabel: String {
@@ -146,7 +171,7 @@ struct ItemMetadataView: View {
             GridRow { Text("Copied").foregroundStyle(.secondary); Text(item.copiedAt.formatted(date: .abbreviated, time: .standard)) }
             GridRow { Text("Source").foregroundStyle(.secondary); Text(item.source.name ?? "Unknown") }
             if item.source.confidence == .inferred { GridRow { Text("Attribution").foregroundStyle(.secondary); Text("Inferred from app activity") } }
-            GridRow { Text("Payload").foregroundStyle(.secondary); Text(ByteCountFormatter.string(fromByteCount: Int64(item.payloadByteCount), countStyle: .file)) }
+            GridRow { Text("Payload").foregroundStyle(.secondary); Text(WinnelStyle.bytes(item.payloadByteCount)) }
         }.font(.callout).frame(maxWidth: .infinity, alignment: .leading)
     }
 }

@@ -7,6 +7,8 @@ public enum CaptureState: String, Sendable { case disabled, active, paused, susp
     public var exclusions: Set<String> = []
     public var onCapture: (ClipPayload, SourceApplication) -> Void
     public var onCaptureFailure: (CaptureSkipReason) -> Void
+    /// Reports copies the user would expect to see but Winnel could not keep. Private markers stay silent.
+    public var onCaptureSkipped: (CaptureSkipReason) -> Void
     public var onStateChange: (CaptureState) -> Void
     private let reader: PasteboardSnapshotReader
     private var generation = 0
@@ -21,8 +23,8 @@ public enum CaptureState: String, Sendable { case disabled, active, paused, susp
     private var pendingSource: SourceApplication?
     private var pendingPrevious: String?
     private var observers: [NSObjectProtocol] = []
-    public init(service: PasteboardService = .init(), onCapture: @escaping (ClipPayload, SourceApplication) -> Void, onStateChange: @escaping (CaptureState) -> Void = { _ in }, onCaptureFailure: @escaping (CaptureSkipReason) -> Void = { _ in }, permissionStatus: (() -> ClipboardAccessStatus)? = nil) {
-        self.service = service; self.reader = PasteboardSnapshotReader(name: service.pasteboard.name.rawValue); self.onCapture = onCapture; self.onStateChange = onStateChange; self.onCaptureFailure = onCaptureFailure; self.permissionStatus = permissionStatus ?? { service.permissionStatus }; lastCount = service.changeCount
+    public init(service: PasteboardService = .init(), onCapture: @escaping (ClipPayload, SourceApplication) -> Void, onStateChange: @escaping (CaptureState) -> Void = { _ in }, onCaptureFailure: @escaping (CaptureSkipReason) -> Void = { _ in }, onCaptureSkipped: @escaping (CaptureSkipReason) -> Void = { _ in }, permissionStatus: (() -> ClipboardAccessStatus)? = nil) {
+        self.service = service; self.reader = PasteboardSnapshotReader(name: service.pasteboard.name.rawValue); self.onCapture = onCapture; self.onStateChange = onStateChange; self.onCaptureFailure = onCaptureFailure; self.onCaptureSkipped = onCaptureSkipped; self.permissionStatus = permissionStatus ?? { service.permissionStatus }; lastCount = service.changeCount
         for name in [NSWorkspace.willSleepNotification, NSWorkspace.sessionDidResignActiveNotification] {
             observers.append(NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in MainActor.assumeIsolated { self?.suspend() } })
         }
@@ -86,11 +88,22 @@ public enum CaptureState: String, Sendable { case disabled, active, paused, susp
                 switch result {
                 case let .captured(payload, attribution): onCapture(payload, attribution)
                 case .skipped(let reason) where reason == .permissionDenied || reason == .permissionRequired: pause(); onCaptureFailure(reason)
+                case .skipped(let reason) where [.oversized, .invalidImage, .unsupported].contains(reason): onCaptureSkipped(reason)
                 default: break
                 }
             }
             pendingPrevious = nil
         } else { idleTicks = min(idleTicks + 1, 100) }
         schedule()
+    }
+}
+
+/// Window-server session state. The lock key is undocumented, so callers use it only as an
+/// additional reason to stay suspended; its absence never proves the screen is unlocked.
+public enum SessionLockState {
+    public static func screenAppearsLocked() -> Bool {
+        guard let session = CGSessionCopyCurrentDictionary() as? [String: Any] else { return false }
+        if let onConsole = session[kCGSessionOnConsoleKey as String] as? Bool, !onConsole { return true }
+        return (session["CGSSessionScreenIsLocked"] as? Bool) == true || (session["CGSSessionScreenIsLocked"] as? Int) == 1
     }
 }
