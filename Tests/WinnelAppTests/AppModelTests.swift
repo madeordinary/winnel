@@ -822,6 +822,8 @@ extension AppModelTests {
         XCTAssertEqual(model.status, "Last copy wasn't saved: together, its formats exceed Winnel's per-copy limit (\(WinnelStyle.captureLimitLabel(model.state.settings.captureByteLimit)) of data).")
         model.captureSkipped(.unsupported)
         XCTAssertTrue(model.status.hasPrefix("Last copy wasn't saved: Winnel keeps one"))
+        model.captureSkipped(.invalidImage)
+        XCTAssertEqual(model.status, "Last copy wasn't saved: the image is unreadable, has several frames, or is larger than 8192 pixels per side or 32 megapixels.")
         await model.shutdown()
     }
 

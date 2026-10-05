@@ -132,7 +132,7 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Your library stays on this Mac. Winnel has no account, cloud sync, analytics, AI or automatic crash uploads. Captured payloads, paths, stack names, metadata, search indexes and previews are encrypted at rest with a Keychain key.")
                         Text("Copy and Paste deliberately replace the system clipboard. Other local apps can observe it. Winnel does not restore an older clipboard later, scrape source pages, fetch remote previews or read arbitrary referenced files. File exports contain references only.")
-                        Text("Copies that arrive from your iPhone, iPad or another Mac through Universal Clipboard are not recorded. Items Winnel copies for you stay on this Mac rather than being offered to your other devices.")
+                        Text("Copies that macOS marks as arriving through Universal Clipboard from your iPhone, iPad or another Mac are not recorded. Winnel asks macOS to keep items it copies for you on this Mac rather than offering them to your other devices.")
                         Text("Unavailable keys or storage failures pause affected work. Winnel never silently stores plaintext or replaces an existing key or library.")
                     }.font(.callout).padding(8)
                 }
