@@ -84,6 +84,8 @@ A later review of the redesigned surfaces found interaction gaps that the appear
 - **Paste honesty.** While no app is verified for direct paste, Return is labeled Copy, paste-only controls are hidden, and Winnel does not offer the Accessibility request.
 - **Denser rows and clearer content.** Rows drop the repeated type caption, show a coarse age that refreshes each minute, and use the native list highlight as the only selection style. New image items are named by format and pixel size. The Library header is shorter, selects a stack automatically, and opens the inspector from List view. Exclusions can be chosen from an app picker, storage values use binary units, and the per-copy capture limit is described as all formats combined.
 
+These behaviors have model tests and offscreen renders only; no native keyboard, menu-bar, lock/sleep or VoiceOver acceptance ran. See [verification](verification.md#keyboard-and-safety-follow-up).
+
 Remaining design gaps: the Library header fits one row only in wide windows and otherwise uses two compact rows; the stack sidebar still combines the native highlight with its own selection outline; copy confirmations are shown in the status line rather than a transient notice; and the Next shortcut is registered globally even when no queue is active.
 
 ## Verification
