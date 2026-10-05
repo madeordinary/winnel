@@ -70,8 +70,8 @@ struct SettingsView: View {
                         HStack {
                             Menu("Pause capture") { Button("15 minutes") { model.pause(until: Date().addingTimeInterval(15 * 60)) }; Button("1 hour") { model.pause(until: Date().addingTimeInterval(60 * 60)) }; Button("Until midnight") { model.pause(until: Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date())) ?? Date().addingTimeInterval(86_400)) }; Button("Until I resume") { model.pause(until: nil) } }
                                 .fixedSize().disabled(!model.state.settings.captureEnabled || model.captureState == .disabled)
-                            Button("Resume") { model.resumeCaptureFromUser() }
-                                .disabled(model.captureState != .suspended && (!model.state.settings.captureEnabled || model.captureState == .active || model.captureState == .disabled))
+                            Button("Resume") { if model.lifecycleSuspended { model.endSuspensionFromUser() } else { model.resumeCaptureFromUser() } }
+                                .disabled(!model.lifecycleSuspended && (!model.state.settings.captureEnabled || model.captureState != .paused))
                         }
                         if let until = model.state.settings.pauseUntil { Text("Scheduled resume: \(until.formatted(date: .abbreviated, time: .shortened))").font(.callout) }
                         Text("Resume starts with the current clipboard counter and does not import copies made during the pause. Capture also stops on lock, sleep and user switch.").font(.callout).foregroundStyle(.secondary)

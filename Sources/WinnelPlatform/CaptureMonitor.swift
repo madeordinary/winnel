@@ -55,6 +55,13 @@ public enum CaptureState: String, Sendable { case disabled, active, paused, susp
         let delay: TimeInterval = pendingSource != nil ? 0.15 : idleTicks > 30 || !(NSApp?.isActive ?? false) ? 1 : 0.25
         timer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in MainActor.assumeIsolated { self?.poll() } }
     }
+    /// A skip is reported only when no item now carries a blocked marker; unreadable item lists stay silent.
+    static func mayReportSkip(on pasteboard: NSPasteboard) -> Bool {
+        guard let items = pasteboard.pasteboardItems else { return false }
+        return !items.contains { item in item.types.contains { CapturePolicy.blockedMarkers.contains($0.rawValue) } }
+    }
+    /// Lets tests wait for the bounded read to finish instead of sleeping.
+    var hasPendingRead: Bool { readInFlight || pendingSource != nil }
     public func poll() {
         guard state == .active, preflightPermission() else { return }
         let app = NSWorkspace.shared.frontmostApplication
@@ -91,8 +98,7 @@ public enum CaptureState: String, Sendable { case disabled, active, paused, susp
                 case .skipped(let reason) where [.oversized, .invalidImage, .unsupported].contains(reason):
                     // Size and image checks run before the settled-marker recheck; a provider may
                     // have marked the copy concealed since. Such copies stay silent.
-                    let marked = service.pasteboard.pasteboardItems?.contains { item in item.types.contains { CapturePolicy.blockedMarkers.contains($0.rawValue) } } ?? true
-                    if !marked { onCaptureSkipped(reason) }
+                    if Self.mayReportSkip(on: service.pasteboard) { onCaptureSkipped(reason) }
                 default: break
                 }
             }

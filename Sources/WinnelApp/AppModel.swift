@@ -61,7 +61,9 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     private var contentGeneration = 0
     private var queueGeneration = 0
     private var queueDispatchPending = false
-    private var lifecycleSuspended = false
+    /// Lock, sleep or user switch suspended capture and plaintext work. Views key the
+    /// "Resume after lock or sleep" control on this flag rather than on the monitor state.
+    @Published private(set) var lifecycleSuspended = false
     private var contentTasks: [UUID: Task<Void, Never>] = [:]
     private enum ContentOperationKind: Hashable { case preview, combination, queuePreparation, queueDispatch, clipboard, exportPreparation }
     private var contentSlots: [ContentOperationKind: (id: UUID, task: Task<Void, Never>)] = [:]
@@ -316,7 +318,10 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         paletteOpenCount += 1
     }
     /// Brings an already open palette forward without touching its query or selection.
-    func requestPaletteFocus() { paletteOpenCount += 1 }
+    func requestPaletteFocus() {
+        if let first = selectedItems.first?.id, first != previewTargetID { loadPreview(first) }
+        paletteOpenCount += 1
+    }
     /// Arrow keys from the search field move a single selection through the visible results.
     func moveVisibleSelection(by offset: Int) {
         let items = visibleItems
@@ -377,12 +382,18 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     }
     /// Only explicit controls call this. Timers and notifications use resumeCapture().
     func resumeCaptureFromUser() {
-        guard recoveryMessage == nil else { return }
+        guard recoveryMessage == nil, state.settings.captureEnabled else { return }
         acknowledgeUserPresence()
-        if state.settings.captureEnabled { resumeCapture() }
-        else if captureState == .suspended { resumeIfPermitted(); refreshSearch() }
+        resumeCapture()
     }
-    /// Whether wake or unlock may still end the current suspension; exposed for regression tests.
+    /// Ends only a lock or sleep suspension whose wake or unlock notice was missed. The saved
+    /// capture choice still applies: capture stays off, paused or timed-paused as the user left it.
+    func endSuspensionFromUser() {
+        guard recoveryMessage == nil, lifecycleSuspended || screenLocked else { return }
+        acknowledgeUserPresence()
+        let generation = captureControlGeneration
+        Task { do { guard let repository else { return }; apply(try await repository.mutate { _ = $0.enforceRetention(now: Date()) }); if generation == captureControlGeneration { resumeIfPermitted() } } catch { fail(error) } }
+    }
     var isLifecycleSuspended: Bool { lifecycleSuspended }
     /// A click on a Winnel control proves an active, unlocked session, so it may clear a
     /// suspension whose wake or unlock notification was missed.
@@ -507,10 +518,13 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
     func capturePaletteTarget() { paletteTarget = targetService.captureTarget() }
     func loadPreview(_ id: UUID) {
         previewPayload = nil; previewThumbnailData = nil; previewThumbnailFinished = false; previewGeneration += 1
-        previewTargetID = id
+        previewTargetID = nil
         let generation = previewGeneration
         let isImage = state.items.first { $0.id == id }?.kind == .image
+        let scheduledBefore = contentSlots[.preview]?.id
         runContentOperation(kind: .preview) { operation in
+            // A load that ends without publishing releases the target so reselecting retries.
+            defer { if self.previewGeneration == generation, self.previewPayload == nil, self.previewTargetID == id { self.previewTargetID = nil } }
             do {
                 guard self.contentOperationIsCurrent(operation), self.previewGeneration == generation else { return }
                 guard let payload = try await self.repository?.payload(id) else { return }
@@ -530,6 +544,7 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
             }
             catch { if self.contentOperationIsCurrent(operation) { self.fail(error) } }
         }
+        if contentSlots[.preview]?.id != scheduledBefore { previewTargetID = id }
     }
     func copySelected() { useSelected(paste: false) }
     func pasteSelected() { useSelected(paste: true) }

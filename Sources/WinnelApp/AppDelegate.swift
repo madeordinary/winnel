@@ -31,6 +31,7 @@ final class PalettePanel: NSPanel {
         // @Published emits before the new value is stored; refresh on the next main-queue turn.
         model.$captureState.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.refreshMenu() }.store(in: &subscriptions)
         model.$queue.receive(on: DispatchQueue.main).sink { [weak self] _ in self?.refreshMenu() }.store(in: &subscriptions)
+        model.$lifecycleSuspended.removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self] _ in self?.refreshMenu() }.store(in: &subscriptions)
         // Turning capture off changes the saved setting after the monitor state has already published.
         model.$state.map(\.settings.captureEnabled).removeDuplicates().receive(on: DispatchQueue.main).sink { [weak self] _ in self?.refreshMenu() }.store(in: &subscriptions)
         model.$recoveryMessage.sink { [weak self] message in
@@ -129,9 +130,9 @@ final class PalettePanel: NSPanel {
         add("Saved Stacks", action: #selector(openLibrary), to: menu)
         menu.addItem(.separator())
         info(state.label, to: menu)
-        if state == .suspended { add("Resume After Lock or Sleep", action: #selector(resumeFromSuspension), to: menu) }
+        if model.lifecycleSuspended { add("Resume After Lock or Sleep", action: #selector(resumeFromSuspension), to: menu) }
         if !model.state.settings.captureEnabled { add("Turn On Capture", action: #selector(toggleCapture), to: menu) }
-        else if state != .suspended { add(state == .active ? "Pause Capture" : "Resume Capture", action: #selector(toggleCapture), to: menu) }
+        else if !model.lifecycleSuspended { add(state == .active ? "Pause Capture" : "Resume Capture", action: #selector(toggleCapture), to: menu) }
         add("Settings…", action: #selector(openSettings), to: menu)
         menu.addItem(.separator()); add("Quit Winnel", action: #selector(quit), to: menu)
         statusItem?.menu = menu
@@ -144,7 +145,7 @@ final class PalettePanel: NSPanel {
     @discardableResult private func add(_ title: String, action: Selector, to menu: NSMenu) -> NSMenuItem { let item = NSMenuItem(title: title, action: action, keyEquivalent: ""); item.target = self; menu.addItem(item); return item }
     private func info(_ title: String, to menu: NSMenu) { let item = NSMenuItem(title: title, action: nil, keyEquivalent: ""); item.isEnabled = false; menu.addItem(item) }
     @objc private func queueNext() { model.nextInQueue() }
-    @objc private func resumeFromSuspension() { model.resumeCaptureFromUser() }
+    @objc private func resumeFromSuspension() { model.endSuspensionFromUser() }
     @objc private func queueBack() { model.backInQueue() }
     @objc private func queueCancel() { model.cancelQueue() }
     @objc private func openPalette() { showPalette() }
@@ -157,7 +158,8 @@ final class PalettePanel: NSPanel {
         model.capturePaletteTarget()
         // Only a fresh opening starts a new session. Re-focusing a visible palette, or opening it
         // while a sheet still depends on the shared selection, keeps the user's query and selection.
-        if panel?.isVisible != true, panel?.attachedSheet == nil, library?.attachedSheet == nil { model.prepareForPaletteOpen() }
+        let inFront = panel?.isVisible == true && panel?.isOnActiveSpace == true
+        if !inFront, panel?.attachedSheet == nil, library?.attachedSheet == nil { model.prepareForPaletteOpen() }
         else { model.requestPaletteFocus() }
         if panel == nil {
             let storedSize = UserDefaults.standard.string(forKey: "paletteSize").map(NSSizeFromString) ?? NSSize(width: 760, height: 600)

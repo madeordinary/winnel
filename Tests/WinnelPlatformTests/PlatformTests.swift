@@ -256,12 +256,24 @@ final class PlatformTests: XCTestCase {
         let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
         board.declareTypes([.string, concealed], owner: nil); board.setString(String(repeating: "s", count: 4_000), forType: .string); board.setData(Data(), forType: concealed)
         monitor.poll(); monitor.poll()
-        // A later ordinary copy proves the monitor processed the concealed change.
+        // Let the concealed read finish before the next change, so it is actually evaluated.
+        try await settle { !monitor.hasPendingRead }
         board.clearContents(); XCTAssertTrue(board.setString("synthetic sentinel", forType: .string))
         monitor.poll(); monitor.poll()
         try await settle { !captured.isEmpty }
         XCTAssertEqual(captured, ["synthetic sentinel"])
         XCTAssertEqual(skipped, [.oversized])
+    }
+    @MainActor func testSkipReportsStaySilentWhenAMarkerIsPresentAtReportTime() {
+        let board = NSPasteboard(name: .init("winnel-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        board.clearContents(); board.setString("synthetic plain", forType: .string)
+        XCTAssertTrue(CaptureMonitor.mayReportSkip(on: board))
+        // A provider can add a marker after the size check without a new change count.
+        board.setData(Data(), forType: .init("org.nspasteboard.ConcealedType"))
+        XCTAssertFalse(CaptureMonitor.mayReportSkip(on: board))
+        board.clearContents(); board.declareTypes([.string, .init("org.nspasteboard.TransientType")], owner: nil); board.setString("synthetic transient", forType: .string)
+        XCTAssertFalse(CaptureMonitor.mayReportSkip(on: board))
     }
     @MainActor func testModifierWaitRechecksCurrentActionAndCancellation() async throws {
         var stillCurrent = true

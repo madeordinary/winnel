@@ -754,15 +754,17 @@ extension AppModelTests {
     }
 
     @MainActor func testWakeWhileLockedWaitsForUnlockAndOnlyUserResumeEndsMissedSuspension() async throws {
-        let (model, _, _) = try await controlledModel()
+        let (model, repo, _) = try await controlledModel()
         model.enableCapture(); try await settle { model.captureState == .active }
         model.handleLifecycleSuspension(screenLocked: true)
         model.resumeAfterWake()
         XCTAssertTrue(model.isLifecycleSuspended, "Waking to the lock screen must not end the suspension")
+        // Automatic resume (timed pause expiry) runs its repository transaction, then must stay suspended.
         model.resumeCapture()
-        XCTAssertTrue(model.isLifecycleSuspended, "Automatic resume (timed pause expiry) must not end a lock suspension")
-        try await Task.sleep(for: .milliseconds(300))
-        XCTAssertEqual(model.captureState, .suspended)
+        _ = try await repo.mutate { _ in }
+        await Task.yield()
+        XCTAssertEqual(model.captureState, .suspended, "Automatic resume must not end a lock suspension")
+        XCTAssertTrue(model.isLifecycleSuspended)
         model.handleScreenUnlocked(); try await settle { model.captureState == .active }
         // A sleep whose wake notification is missed stays suspended until the user acts.
         model.handleLifecycleSuspension()
@@ -866,9 +868,9 @@ extension AppModelTests {
         model.screenLockProbe = { true }
         model.resumeAfterWake()
         XCTAssertTrue(model.isLifecycleSuspended)
-        model.resumeCaptureFromUser()
+        model.endSuspensionFromUser()
         XCTAssertFalse(model.isLifecycleSuspended)
-        XCTAssertEqual(model.captureState, .disabled)
+        try await settle { model.captureState == .disabled }
         XCTAssertFalse(model.state.settings.captureEnabled, "Ending a suspension never turns capture on")
         model.selectedIDs = [item.id]; model.selectionOrder = [item.id]
         model.loadPreview(item.id); await model.waitForContentOperations()
@@ -896,6 +898,42 @@ extension AppModelTests {
         board.clearContents(); XCTAssertTrue(board.writeObjects(["synthetic first" as NSString, "synthetic second" as NSString]))
         model.monitor.poll(); model.monitor.poll()
         try await settle { model.status.hasPrefix("Last copy wasn't saved: Winnel keeps one") }
+        await model.shutdown()
+    }
+}
+
+extension AppModelTests {
+    @MainActor func testEndingAMissedSuspensionKeepsTheUsersPause() async throws {
+        let (model, _, _) = try await controlledModel()
+        model.enableCapture(); try await settle { model.captureState == .active }
+        model.pause(until: nil); try await settle { model.state.settings.capturePaused == true }
+        model.handleLifecycleSuspension(screenLocked: true)
+        XCTAssertEqual(model.captureState, .suspended)
+        model.endSuspensionFromUser()
+        XCTAssertFalse(model.isLifecycleSuspended)
+        try await settle { model.captureState == .paused }
+        XCTAssertEqual(model.state.settings.capturePaused, true, "Ending the suspension must not cancel the user's pause")
+        await model.shutdown()
+    }
+
+    @MainActor func testPreviewTargetIsReleasedWhenALoadIsRefusedOrDiscarded() async throws {
+        let gate = OperationBarrier()
+        let (model, _, item) = try await controlledModel(payloadGate: gate)
+        // A load whose selection is cleared before it publishes releases its target.
+        await gate.arm(); model.loadPreview(item.id); await gate.waitUntilEntered()
+        XCTAssertEqual(model.previewTargetID, item.id)
+        model.selectedIDs = []
+        await gate.release(); await model.waitForContentOperations()
+        XCTAssertNil(model.previewPayload)
+        XCTAssertNil(model.previewTargetID, "Reselecting the item must be able to load it again")
+        model.selectedIDs = [item.id]; model.selectionOrder = [item.id]
+        model.loadPreview(item.id); await model.waitForContentOperations()
+        XCTAssertEqual(model.previewPayload?.plainText, "synthetic protected content")
+        XCTAssertEqual(model.previewTargetID, item.id)
+        // A load refused during a suspension never claims the target.
+        model.handleLifecycleSuspension()
+        model.loadPreview(item.id)
+        XCTAssertNil(model.previewTargetID)
         await model.shutdown()
     }
 }

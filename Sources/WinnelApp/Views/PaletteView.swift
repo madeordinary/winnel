@@ -37,10 +37,10 @@ struct PaletteView: View {
                         Button("Saved stacks") { model.onShowLibrary?() }
                         Button("Settings") { model.onShowSettings?() }
                         Divider()
-                        if model.captureState == .suspended { Button("Resume after lock or sleep") { model.resumeCaptureFromUser() } }
+                        if model.lifecycleSuspended { Button("Resume after lock or sleep") { model.endSuspensionFromUser() } }
                         if !model.state.settings.captureEnabled { Button("Turn on capture") { model.enableCapture() } }
+                        else if model.lifecycleSuspended { EmptyView() }
                         else if model.captureState == .paused { Button("Resume capture") { model.resumeCaptureFromUser() } }
-                        else if model.captureState == .suspended { EmptyView() }
                         else { Button("Pause capture for 15 minutes") { model.pause(until: Date().addingTimeInterval(900)) }; Button("Pause until I resume") { model.pause(until: nil) } }
                     } label: { Image(systemName: "ellipsis.circle") }
                         .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Capture, library and settings")
@@ -97,7 +97,8 @@ struct PaletteView: View {
         .onChange(of: model.selectedIDs) { old, new in
             model.selectionOrder = model.selectionOrder.filter { new.contains($0) } + model.visibleItems.filter { new.contains($0.id) && !old.contains($0.id) && !model.selectionOrder.contains($0.id) }.map(\.id)
         }
-        .onChange(of: model.selectedItems.first?.id) { _, id in
+        // Initial as well, so a newly created palette shows the selection it inherits.
+        .onChange(of: model.selectedItems.first?.id, initial: true) { _, id in
             if let id, id != model.previewTargetID { model.loadPreview(id) }
         }
         .onExitCommand { model.cancelQueue(); model.onDismissPalette?() }
@@ -115,7 +116,7 @@ struct PaletteView: View {
         .alert("Unpin and remove this item?", isPresented: Binding(get: { unpinItem != nil }, set: { if !$0 { unpinItem = nil } })) {
             Button("Cancel", role: .cancel) { unpinItem = nil }
             Button("Unpin and remove", role: .destructive) { if let item = unpinItem { model.togglePin(item.id) }; unpinItem = nil }
-        } message: { Text("It has no other saved reference and falls outside your recent history (its time window or item limit), so unpinning removes it from Winnel.") }
+        } message: { Text("It has no other saved reference and is no longer kept in recent history, so unpinning removes it from Winnel.") }
     }
     @ViewBuilder private var itemList: some View {
         if model.visibleItems.isEmpty {
