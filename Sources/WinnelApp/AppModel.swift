@@ -546,6 +546,11 @@ enum LibraryScope: String, CaseIterable { case recent, pinned, all }
         }
         if contentSlots[.preview]?.id != scheduledBefore { previewTargetID = id }
     }
+    /// Diagnostics render synthetic previews without a repository; the target marks them as loaded.
+    func injectFixturePreview(_ payload: ClipPayload, for id: UUID) {
+        precondition(fixtureMode, "Injected previews are for synthetic diagnostics only")
+        previewPayload = payload; previewTargetID = id
+    }
     func copySelected() { useSelected(paste: false) }
     func pasteSelected() { useSelected(paste: true) }
     private func useSelected(paste: Bool) {

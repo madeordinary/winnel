@@ -18,18 +18,19 @@ import WinnelCore
         model.usageBytes = model.state.managedPayloadBytes
         let item = model.state.recentItems.first(where: { $0.kind == .text })!
         model.selectedIDs = [item.id]; model.selectionOrder = [item.id]
-        model.previewPayload = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data("A deliberately synthetic clipboard example.\nNo private data is used.".utf8))])
+        let samplePreview = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data("A deliberately synthetic clipboard example.\nNo private data is used.".utf8))])
+        model.injectFixturePreview(samplePreview, for: item.id)
         let libraryModel = AppModel(fixtureMode: true)
         libraryModel.state = model.state
         let stack = libraryModel.state.stacks[0]
         let member = libraryModel.state.items.first { $0.id == stack.memberships[3].itemID }!
         libraryModel.selectedIDs = [member.id]; libraryModel.selectionOrder = [member.id]
-        libraryModel.previewPayload = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data(member.textPreview.utf8))])
+        libraryModel.injectFixturePreview(ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data(member.textPreview.utf8))]), for: member.id)
         let queueModel = AppModel(fixtureMode: true)
         queueModel.state = model.state
         queueModel.selectedIDs = [item.id]; queueModel.selectionOrder = [item.id]
-        queueModel.previewPayload = model.previewPayload
-        queueModel.queue = .init(entries: [.init(item: item, payload: model.previewPayload!)], now: Date())
+        queueModel.injectFixturePreview(samplePreview, for: item.id)
+        queueModel.queue = .init(entries: [.init(item: item, payload: samplePreview)], now: Date())
         let filteredModel = AppModel(fixtureMode: true)
         filteredModel.state = model.state
         filteredModel.kindFilter = .richText
@@ -43,7 +44,7 @@ import WinnelCore
         let searchModel = AppModel(fixtureMode: true)
         searchModel.state = model.state
         searchModel.searchQuery = "entry 1"
-        if let first = searchModel.selectedItems.first { searchModel.previewPayload = ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data(first.textPreview.utf8))]) }
+        if let first = searchModel.selectedItems.first { searchModel.injectFixturePreview(ClipPayload(representations: [.init(type: "public.utf8-plain-text", data: Data(first.textPreview.utf8))]), for: first.id) }
         let libraryQueueModel = AppModel(fixtureMode: true)
         libraryQueueModel.state = model.state
         let queued = stack.memberships.prefix(5).compactMap { membership in model.state.items.first { $0.id == membership.itemID } }
