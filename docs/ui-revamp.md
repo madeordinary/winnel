@@ -8,7 +8,7 @@ Winnel’s revamp improves recognition, navigation and the visibility of existin
 
 The research reviewed official website content, promotional interface imagery, release articles and privacy documentation. Supaste was not installed or exercised. Advertised interactions establish design references, not measured usability, performance, accessibility, security or paste compatibility. Winnel’s implementation and its recorded verification remain separate sources of evidence.
 
-The [homepage and FAQ](https://www.supaste.com/) describe rapid retrieval through several surfaces alongside broader collection management. The homepage advertises visual history, categories, app/type filtering, Quick Paste, a shelf, Library, combined clips, OCR, inline shortcuts and reminders. FAQ questions address capture, storage and optional sync. Browser text extraction did not expose every accordion answer, so the research does not treat those answers as a complete specification.
+The [homepage and FAQ](https://www.supaste.com/) describe rapid retrieval through several surfaces alongside broader collection management. The homepage advertises visual history, categories, app/type filtering, Quick Paste, a shelf, Library, combined clips, OCR, inline shortcuts and reminders. FAQ questions address capture, storage and optional sync. Not every FAQ answer was available in the reviewed text, so the research does not treat those answers as a complete specification.
 
 The detailed official release sources are:
 
@@ -19,7 +19,7 @@ The detailed official release sources are:
 - [v1.6, July 16](https://www.supaste.com/updates/supaste-v1.6): optional filter/collection chrome, clip sizing and video preview changes.
 - [v1.7, July 24](https://www.supaste.com/updates/supaste-1.7): iCloud, automatic filtering, Dropbox sharing, Apple Intelligence tools and shortcut removal.
 
-The [roadmap](https://www.supaste.com/roadmap) exposes a feedback invitation in browser-readable content; no delivery commitments were established. The [privacy policy](https://www.supaste.com/privacy), dated May 29, describes local processing, capture controls, imperfect sensitive detection and network use for link previews and licensing. Its no-sync statement predates the July sync announcement. This is a public documentation discrepancy, not evidence of improper data handling.
+The [roadmap](https://www.supaste.com/roadmap) exposes a feedback invitation in browser-readable content; no delivery commitments were established. The [privacy policy](https://www.supaste.com/privacy), dated May 29, describes local processing, capture controls, imperfect sensitive detection and network use for link previews and licensing.
 
 ## Lessons and Winnel choices
 
@@ -77,6 +77,6 @@ This is a closer presentation, not full Supaste equivalence. Unselected image ca
 
 The initial revamp passed 125 network-denied XCTest tests, including two regressions for type-filter search, selection and pending Copy cancellation. The optimized local app builds and uses an ad-hoc development signature. Its diagnostics generate 29 actual SwiftUI component renders with synthetic data, covering light/dark surfaces, Settings categories, palette/queue minimum 620×420, selected Library minimum 900×500 and export minimum 500×380. Inspection found and corrected low-contrast stack selection, an overflowing empty state and export content that needed scrolling while keeping its footer visible.
 
-These are component appearance checks. The native test producer was readable, but the UI connection repeatedly failed when inspecting Winnel, so no new native JSON-export or keyboard result is claimed. VoiceOver, complete scrolling/focus behavior, real consent and cross-app paste remain unverified. The combination and selection-order renders cover their supplied empty/single-item state only. See [verification scope](verification.md#ui-revamp-verification) for provenance and remaining limits.
+These are component appearance checks. The native test producer was readable, but accessibility-based automation repeatedly failed to read Winnel's window state, so no new native JSON-export or keyboard result is claimed. VoiceOver, complete scrolling/focus behavior, real consent and cross-app paste remain unverified. The combination and selection-order renders cover their supplied empty/single-item state only. See [verification scope](verification.md#ui-revamp-verification) for provenance and remaining limits.
 
 The subsequent [PRD follow-up](verification.md#prd-follow-up) adds tested onboarding practice/pause behavior, configured shortcut labels, shared Combine eligibility and a mixed JSON export regression. Native acceptance remains a separate gate.
